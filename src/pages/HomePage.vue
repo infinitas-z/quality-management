@@ -353,15 +353,26 @@ const qualityWarningStats = computed(() => {
 
 const currentWarningCount = computed(() => qualityWarningStats.value.warning + qualityWarningStats.value.alarm)
 
+const totalQualityRecords = computed(() => qualityWarningStats.value.normal + qualityWarningStats.value.warning + qualityWarningStats.value.alarm)
+
+const warningRate = computed(() => totalQualityRecords.value ? Math.round((qualityWarningStats.value.warning / totalQualityRecords.value) * 100) : 0)
+const alarmRate = computed(() => totalQualityRecords.value ? Math.round((qualityWarningStats.value.alarm / totalQualityRecords.value) * 100) : 0)
+const normalRate = computed(() => Math.max(0, 100 - warningRate.value - alarmRate.value))
+
+const warningDonutStyle = computed(() => ({
+  background: `conic-gradient(#2f80ed 0 ${normalRate.value}%, #f2994a ${normalRate.value}% ${normalRate.value + warningRate.value}%, #eb5757 ${normalRate.value + warningRate.value}% 100%)`,
+}))
+
+const warningWarehouseCount = computed(() => new Set(qualityWarningRecords.value.map((item) => normalizedCargoPosition(item.record))).size)
+const warningUnqualifiedTotal = computed(() => qualityWarningRecords.value.reduce((total, item) => total + item.count, 0))
+
 const warningTypes = computed(() => {
-  const counts = qualityWarningRecords.value.reduce<Record<string, number>>((result, item) => {
-    item.items.forEach((name) => {
-      result[name] = (result[name] ?? 0) + 1
-    })
-    return result
-  }, {})
-  const maxCount = Math.max(...Object.values(counts), 1)
-  return Object.entries(counts).map(([label, count]) => ({
+  const rows = [
+    { label: '质量预警', count: qualityWarningStats.value.warning },
+    { label: '质量报警', count: qualityWarningStats.value.alarm },
+  ]
+  const maxCount = Math.max(...rows.map((item) => item.count), 1)
+  return rows.map(({ label, count }) => ({
     label,
     count,
     percent: Math.max(18, Math.round((count / maxCount) * 100)),
@@ -371,7 +382,9 @@ const warningTypes = computed(() => {
 const warningRecords = computed(() => qualityWarningRecords.value.map((item) => ({
   level: item.level === '质量报警' ? '报警' : '预警',
   warehouse: `${item.record.warehouseNo}仓`,
-  content: `${displaySampleNo(item.record)} ${item.items.join('、')}`,
+  position: normalizedCargoPosition(item.record),
+  sampleName: item.record.sampleName,
+  content: `不合格项 ${item.count} 项`,
   status: item.status,
   sampleNo: item.record.sampleNo,
 })))
@@ -1457,19 +1470,24 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 </div>
               </div>
 
-              <div class="warning-levels">
-                <div><span class="dot normal"></span>正常 {{ qualityWarningStats.normal }}</div>
-                <div><span class="dot warning"></span>预警 {{ qualityWarningStats.warning }}</div>
-                <div><span class="dot alarm"></span>报警 {{ qualityWarningStats.alarm }}</div>
-              </div>
-
-              <div class="warning-type-list">
-                <div v-for="type in warningTypes" :key="type.label" class="warning-type-row">
-                  <span>{{ type.label }}</span>
-                  <i :style="{ width: `${type.percent}%` }"></i>
-                  <b>{{ type.count }}</b>
+              <div class="warning-donut-card">
+                <div class="warning-donut" :style="warningDonutStyle"><span>{{ totalQualityRecords ? Math.round((currentWarningCount / totalQualityRecords) * 100) : 0 }}%</span></div>
+                <div class="warning-donut-legend">
+                  <span><i class="normal"></i>正常 {{ normalRate }}%</span>
+                  <span><i class="warning"></i>预警 {{ warningRate }}%</span>
+                  <span><i class="alarm"></i>报警 {{ alarmRate }}%</span>
                 </div>
               </div>
+
+            
+
+              <div class="warning-summary-grid">
+                <div><span>对应货位</span><b>{{ warningWarehouseCount }}</b></div>
+                <div><span>预警类型</span><b>{{ warningTypes.length }}</b></div>
+                <div><span>不合格项</span><b>{{ warningUnqualifiedTotal }}</b></div>
+              </div>
+
+           
 
               <div class="warning-list-placeholder">
                 <div class="list-title">实时预警列表</div>
@@ -1480,8 +1498,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                   @click="openQualityWarningRecord(record.sampleNo, record.warehouse)"
                 >
                   <span :class="['warning-tag', record.level]">{{ record.level }}</span>
-                  {{ record.warehouse }} {{ record.content }}
-                  <em>{{ record.status }}</em>
+                  {{ record.position }} {{ record.sampleName }} {{ record.content }}
                 </button>
                 <button v-if="!warningRecords.length" type="button" disabled>
                   <span class="warning-tag normal">正常</span>
@@ -1508,7 +1525,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 <thead>
                   <tr>
                     <th>任务编号</th>
-                    <th>仓号</th>
+                    <th>货位号</th>
                     <th>样品编号</th>
                     <th>流程状态</th>
                     <th>全流程信息</th>
@@ -1670,7 +1687,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             </div>
 
             <div class="sampling-table-card">
-              <table class="sampling-table">
+              <table class="sampling-table destroy-table">
                 <thead>
                   <tr>
                     <th>样品编号</th>
@@ -1938,7 +1955,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     <td>{{ item.record.reportNo ?? '—' }}</td>
                     <td>{{ displaySampleNo(item.record) }}</td>
                     <td>{{ item.record.sampleName }}</td>
-                    <td>{{ item.record.warehouseNo }}</td>
+                    <td>{{ normalizedCargoPosition(item.record) }}</td>
                     <td>{{ item.record.grainType }}</td>
                     <td><button class="unqualified-count-btn" type="button" @click="openUnqualifiedItems(item.record.sampleNo)">{{ item.count }} 项</button></td>
                     <td><button class="unqualified-detail-link" type="button" @click="openUnqualifiedItems(item.record.sampleNo)">查看不合格项</button></td>
@@ -2498,14 +2515,17 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 <div><span>样品名称</span><b>{{ selectedUnqualifiedRecord.sampleName }}</b></div>
                 <div><span>不合格数量</span><b>{{ reportUnqualifiedCount(selectedUnqualifiedRecord) }} 项</b></div>
               </div>
-              <table class="unqualified-detail-table">
-                <thead><tr><th>序号</th><th>不合格项目</th><th>检测结果</th><th>判定</th><th>处置建议</th></tr></thead>
-                <tbody>
-                  <tr v-for="(item, index) in reportUnqualifiedItems(selectedUnqualifiedRecord)" :key="item">
-                    <td>{{ index + 1 }}</td><td class="unqualified-text">{{ item }}</td><td>{{ qualityLevelItems.includes(item) ? qualityDetectValue(selectedUnqualifiedRecord, item) : healthDetectValue(selectedUnqualifiedRecord, item) }}</td><td><span class="warning-level-badge alarm">不合格</span></td><td>{{ reportUnqualifiedCount(selectedUnqualifiedRecord) >= 3 ? '进入质量报警处置，建议销样或复检' : '进入质量预警，建议复核检测' }}</td>
-                  </tr>
-                </tbody>
-              </table>
+              <div class="unqualified-detail-wrap">
+                <table class="unqualified-detail-table">
+                  <colgroup><col class="unqualified-index-col" /><col /><col /><col /><col /></colgroup>
+                  <thead><tr><th>序号</th><th>不合格项目</th><th>检测结果</th><th>判定</th><th>处置建议</th></tr></thead>
+                  <tbody>
+                    <tr v-for="(item, index) in reportUnqualifiedItems(selectedUnqualifiedRecord)" :key="item">
+                      <td>{{ index + 1 }}</td><td class="unqualified-text">{{ item }}</td><td>{{ qualityLevelItems.includes(item) ? qualityDetectValue(selectedUnqualifiedRecord, item) : healthDetectValue(selectedUnqualifiedRecord, item) }}</td><td><span class="warning-level-badge alarm">不合格</span></td><td>{{ reportUnqualifiedCount(selectedUnqualifiedRecord) >= 3 ? '进入质量报警处置，建议销样或复检' : '进入质量预警，建议复核检测' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </section>
         </div>
