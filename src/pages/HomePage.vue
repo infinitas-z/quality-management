@@ -345,11 +345,42 @@ const qualityWarningRecords = computed(() => {
 const qualityWarningStats = computed(() => {
   const rows = reportRecords.value.map((record) => reportUnqualifiedCount(record))
   return {
-    normal: rows.filter((count) => count === 0).length,
+    normal: reportRecords.value.filter((record) => record.labelStatus === '留样' && reportUnqualifiedCount(record) === 0).length,
     warning: rows.filter((count) => count > 0 && count < 3).length,
     alarm: rows.filter((count) => count >= 3).length,
   }
 })
+
+const currentWarningCount = computed(() => qualityWarningStats.value.warning + qualityWarningStats.value.alarm)
+
+const warningTypes = computed(() => {
+  const counts = qualityWarningRecords.value.reduce<Record<string, number>>((result, item) => {
+    item.items.forEach((name) => {
+      result[name] = (result[name] ?? 0) + 1
+    })
+    return result
+  }, {})
+  const maxCount = Math.max(...Object.values(counts), 1)
+  return Object.entries(counts).map(([label, count]) => ({
+    label,
+    count,
+    percent: Math.max(18, Math.round((count / maxCount) * 100)),
+  }))
+})
+
+const warningRecords = computed(() => qualityWarningRecords.value.map((item) => ({
+  level: item.level === '质量报警' ? '报警' : '预警',
+  warehouse: `${item.record.warehouseNo}仓`,
+  content: `${displaySampleNo(item.record)} ${item.items.join('、')}`,
+  status: item.status,
+  sampleNo: item.record.sampleNo,
+})))
+
+const openQualityWarningRecord = (sampleNo: string, warehouse: string) => {
+  selectedSamplingNo.value = sampleNo
+  selectedWarehouse.value = warehouse
+  activeMenu.value = 'warning'
+}
 
 const qualityReportTabs = [
   { key: 'cargo', label: '货位明细表' },
@@ -1207,19 +1238,6 @@ const overviewCards = computed(() => [
   { label: '待检批次', value: '4 批' },
 ])
 
-const warningTypes = [
-  { label: '水分超标', count: 2, percent: 72 },
-  { label: '检验临期', count: 1, percent: 48 },
-  { label: '温湿异常', count: 1, percent: 42 },
-  { label: '数据未更新', count: 2, percent: 58 },
-]
-
-const warningRecords = [
-  { level: '报警', warehouse: '53仓', content: '质量等级待复检', status: '待确认' },
-  { level: '预警', warehouse: '51仓', content: '质量等级波动', status: '处理中' },
-  { level: '预警', warehouse: '50仓', content: '检验报告待审核', status: '待审核' },
-]
-
 const processStatusText = (record: SamplingRecord) => {
   if (record.approvalStatus === '退回修改') return '退回修改'
   if (record.approvalStep) return '待审核'
@@ -1435,14 +1453,14 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 <TriangleAlert :size="24" />
                 <div>
                   <span>当前预警</span>
-                  <strong>6</strong>
+                  <strong>{{ currentWarningCount }}</strong>
                 </div>
               </div>
 
               <div class="warning-levels">
-                <div><span class="dot normal"></span>正常 2</div>
-                <div><span class="dot warning"></span>预警 2</div>
-                <div><span class="dot alarm"></span>报警 1</div>
+                <div><span class="dot normal"></span>正常 {{ qualityWarningStats.normal }}</div>
+                <div><span class="dot warning"></span>预警 {{ qualityWarningStats.warning }}</div>
+                <div><span class="dot alarm"></span>报警 {{ qualityWarningStats.alarm }}</div>
               </div>
 
               <div class="warning-type-list">
@@ -1457,13 +1475,18 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 <div class="list-title">实时预警列表</div>
                 <button
                   v-for="record in warningRecords"
-                  :key="`${record.warehouse}-${record.content}`"
+                  :key="record.sampleNo"
                   type="button"
-                  @click="selectedWarehouse = record.warehouse"
+                  @click="openQualityWarningRecord(record.sampleNo, record.warehouse)"
                 >
                   <span :class="['warning-tag', record.level]">{{ record.level }}</span>
                   {{ record.warehouse }} {{ record.content }}
                   <em>{{ record.status }}</em>
+                </button>
+                <button v-if="!warningRecords.length" type="button" disabled>
+                  <span class="warning-tag normal">正常</span>
+                  暂无质量预警记录
+                  <em>已同步质量记录</em>
                 </button>
               </div>
             </section>
