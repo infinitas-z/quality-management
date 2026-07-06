@@ -152,7 +152,7 @@ const menuItems: MenuItem[] = [
   { key: 'report', label: '质量报表管理', icon: BookOpenText },
   { key: 'lab', label: '检化验室管理', icon: BriefcaseBusiness },
   { key: 'reagent', label: '检化验试剂管理', icon: Boxes },
-  { key: 'system', label: '系统管理', icon: Settings },
+  { key: 'system', label: '用户管理', icon: Settings },
 ]
 
 const activeMenu = ref('dashboard')
@@ -615,14 +615,31 @@ const externalReasons = ['入库前检验', '春季普查', '秋季普查', '储
 const grainOptions = ['早籼稻谷', '晚粳稻', '晚籼稻谷', '小麦', '玉米']
 const warehouseOptions = ['49', '50']
 const flowNodes = computed(() => [
-  { name: '扦样单', count: allSamplingRecords.value.length, status: 'active', icon: ClipboardPenLine },
-  { name: '样品标签', count: labelRecords.value.length, status: 'done', icon: Printer },
-  { name: '检验报告', count: completedReportRecords.value.length, status: 'active', icon: ClipboardList },
-  { name: '在线审批', count: reportRecords.value.filter((item) => item.approvalStep).length, status: 'warning', icon: CheckCircle2 },
-  { name: '样品台账', count: ledgerRecords.value.length, status: 'done', icon: BookOpenText },
-  { name: '留样管理', count: retainRecords.value.length, status: 'normal', icon: PackageCheck },
-  { name: '销样管理', count: destroyRecords.value.length, status: 'normal', icon: Trash2 },
+  { name: '扦样单', count: allSamplingRecords.value.length, status: 'active', icon: ClipboardPenLine, tab: 'sampling', action: 'sampling' },
+  { name: '样品标签', count: labelRecords.value.length, status: 'done', icon: Printer, tab: 'label', action: 'label' },
+  { name: '检验报告', count: completedReportRecords.value.length, status: 'active', icon: ClipboardList, tab: 'report', action: 'report' },
+  { name: '在线审批', count: reportRecords.value.filter((item) => item.approvalStep).length, status: 'warning', icon: CheckCircle2, tab: 'report', action: 'approval' },
+  { name: '样品台账', count: ledgerRecords.value.length, status: 'done', icon: BookOpenText, tab: 'ledger', action: 'ledger' },
+  { name: '留样管理', count: retainRecords.value.length, status: 'normal', icon: PackageCheck, tab: 'retain', action: 'retain' },
+  { name: '销样管理', count: destroyRecords.value.length, status: 'normal', icon: Trash2, tab: 'destroy', action: 'destroy' },
 ])
+
+const openInspectionFlowNode = (tab: string, action?: string) => {
+  activeMenu.value = 'inspection'
+  inspectionTab.value = tab
+  if (action === 'sampling') {
+    openSamplingForm('create')
+  } else if (action === 'label' && labelRecords.value[0]) {
+    openSampleLabelPrint(labelRecords.value[0].sampleNo)
+  } else if (action === 'report') {
+    const editableRecord = reportRecords.value.find((item) => canEditReportResult(item))
+    if (editableRecord) openReportForm(editableRecord.sampleNo)
+    else if (completedReportRecords.value[0]) openReportView(completedReportRecords.value[0].sampleNo)
+  } else if (action === 'approval') {
+    const approvalRecord = currentApprovalTodoRecords.value[0] ?? reportRecords.value.find((item) => item.approvalStep)
+    if (approvalRecord) openApprovalFlow(approvalRecord.sampleNo)
+  }
+}
 
 const inspectionKpis = computed(() => [
   { label: '今日扦样', value: allSamplingRecords.value.filter((item) => item.samplingDate === '2026-07-04').length },
@@ -632,11 +649,11 @@ const inspectionKpis = computed(() => [
   { label: '待销样', value: destroyRecords.value.length },
 ])
 
-const sampleStatusRows = computed(() => ['录入中', '扦样完成', '已送样'].map((status) => {
-  const count = allSamplingRecords.value.filter((item) => item.status === status).length
+const sampleStatusRows = computed(() => ['录入中', '扦样完成', '已送样', '待检', '在检', '检毕', '留样', '销样'].map((status) => {
+  const count = allSamplingRecords.value.filter((item) => item.status === status || (item.status === '已收样' && (item.labelStatus ?? '待检') === status)).length
   const percent = allSamplingRecords.value.length ? Math.round((count / allSamplingRecords.value.length) * 100) : 0
   return { status, count, percent }
-}))
+}).filter((item) => item.count > 0))
 
 const buildReportNo = (record: SamplingRecord) => {
   const sourceCode = record.source === '内部扦样' ? 'NB' : 'WB'
@@ -873,6 +890,8 @@ const openReportView = (sampleNo: string) => {
 const canApproveReport = (record: SamplingRecord) => {
   return record.labelStatus === '检毕' && record.approvalStep === currentLoginUser.value?.role
 }
+
+const currentApprovalTodoRecords = computed(() => reportRecords.value.filter((record) => canApproveReport(record)))
 
 const approveReport = (sampleNo: string, action: 'pass' | 'return' | 'destroy') => {
   selectedSamplingNo.value = sampleNo
@@ -1178,23 +1197,54 @@ const warningRecords = [
   { level: '预警', warehouse: '50仓', content: '检验报告待审核', status: '待审核' },
 ]
 
-const taskStages = [
-  { label: '待扦样', value: 1, icon: ClipboardPenLine },
-  { label: '已扦样', value: 2, icon: PackageCheck },
-  { label: '检验中', value: 1, icon: Microscope },
-  { label: '待审核', value: 1, icon: ClipboardList },
-  { label: '已完成', value: 2, icon: CheckCircle2 },
-  { label: '超期', value: 1, icon: TriangleAlert },
-]
+const processStatusText = (record: SamplingRecord) => {
+  if (record.approvalStatus === '退回修改') return '退回修改'
+  if (record.approvalStep) return '待审核'
+  if (['留样', '销样'].includes(String(record.labelStatus)) || record.approvalStatus === '审批通过') return '已完成'
+  if (record.status === '已收样' && ['待检', '在检', '检毕'].includes(String(record.labelStatus ?? '待检'))) return '检验中'
+  if (record.status === '扦样完成') return '已扦样'
+  if (record.status === '录入中') return '待扦样'
+  return record.status
+}
 
-const processDetails = [
-  { code: 'QT20260630001', warehouse: '53仓', sample: 'SMP20260630021', status: '待扦样', grainType: '小麦', owner: '张三', taskTime: '2026-06-30 18:00' },
-  { code: 'QT20260630002', warehouse: '49仓', sample: 'SMP20260629014', status: '已扦样', grainType: '小麦', owner: '李四', taskTime: '2026-07-01 12:00' },
-  { code: 'QT20260630003', warehouse: '51仓', sample: 'SMP20260628009', status: '检验中', grainType: '玉米', owner: '王五', taskTime: '2026-07-01 16:00' },
-  { code: 'QT20260630004', warehouse: '50仓', sample: 'SMP20260627006', status: '待审核', grainType: '稻谷', owner: '赵六', taskTime: '2026-07-02 10:00' },
-  { code: 'QT20260630005', warehouse: '52仓', sample: 'SMP20260625003', status: '已完成', grainType: '小麦', owner: '陈七', taskTime: '2026-06-29 17:00' },
-  { code: 'QT20260630006', warehouse: '53仓', sample: 'SMP20260624002', status: '超期', grainType: '小麦', owner: '周八', taskTime: '2026-06-29 12:00' },
-]
+const isOverdueProcess = (record: SamplingRecord) => !['已收样'].includes(record.status) && record.samplingDate < '2026-07-04'
+
+const flowStageSummary = (record: SamplingRecord) => {
+  const hasReceived = record.status === '已收样'
+  const labelStatus = hasReceived ? record.labelStatus ?? '待检' : '未收样'
+  const reportStatus = record.reportNo ? `${record.reportNo}（${reportConclusion(record)}）` : labelStatus === '在检' ? '录入中' : labelStatus === '检毕' ? '待提交' : '未生成'
+  const approvalStatus = record.approvalStep ? `${record.approvalStep}待审` : record.approvalStatus ?? '未提交'
+  const ledgerStatus = hasReceived ? ledgerHandleMethod(record) : '未入账'
+  return [
+    `扦样单：${record.status}`,
+    `样品标签：${labelStatus}`,
+    `检验报告：${reportStatus}`,
+    `在线审批：${approvalStatus}`,
+    `样品台账：${ledgerStatus}`,
+    `留样管理：${record.labelStatus === '留样' ? ledgerHandleTime(record) : '未留样'}`,
+    `销样管理：${record.labelStatus === '销样' ? ledgerHandleTime(record) : '未销样'}`,
+  ].join(' / ')
+}
+
+const taskStages = computed(() => [
+  { label: '待扦样', value: allSamplingRecords.value.filter((item) => processStatusText(item) === '待扦样').length, icon: ClipboardPenLine },
+  { label: '已扦样', value: allSamplingRecords.value.filter((item) => processStatusText(item) === '已扦样').length, icon: PackageCheck },
+  { label: '检验中', value: allSamplingRecords.value.filter((item) => processStatusText(item) === '检验中').length, icon: Microscope },
+  { label: '待审核', value: reportRecords.value.filter((item) => item.approvalStep).length, icon: ClipboardList },
+  { label: '已完成', value: allSamplingRecords.value.filter((item) => processStatusText(item) === '已完成').length, icon: CheckCircle2 },
+  { label: '超期', value: allSamplingRecords.value.filter((item) => isOverdueProcess(item)).length, icon: TriangleAlert },
+])
+
+const processDetails = computed(() => allSamplingRecords.value.map((record) => ({
+  code: record.orderNo,
+  warehouse: `${cargoPositionWarehouseNo(normalizeCargoPositionValue(record))}仓`,
+  sample: displaySampleNo(record),
+  status: isOverdueProcess(record) ? '超期' : processStatusText(record),
+  grainType: record.grainType,
+  owner: record.approvalStep ? systemUsers.value.find((user) => user.role === record.approvalStep)?.name ?? record.approvalStep : record.receiver ?? record.sender ?? record.sampler,
+  taskTime: record.approvalHistory?.[record.approvalHistory.length - 1]?.time ?? record.receiveTime ?? record.sendTime ?? record.samplingDate,
+  flowSummary: flowStageSummary(record),
+})))
 
 const shouldHideOwnerAndTime = (status: string) => status.startsWith('待')
 const shouldHideGrainType = (status: string) => status === '待扦样'
@@ -1211,7 +1261,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
       <label class="login-field username-field"><input v-model="loginForm.username" placeholder="用户名/邮箱/手机号" /></label>
       <label class="login-field password-field"><input v-model="loginForm.password" type="password" placeholder="密码" /></label>
       <div v-if="loginError" class="unqualified-text">{{ loginError }}</div>
-      <label class="remember-line"><input type="checkbox" /> <span>记住密码</span></label>
+      <label class="remember-line"><input type="checkbox" style="zoom: 200%;" /> <span>记住密码</span></label>
       <button type="button" @click="handleLogin">登 录</button>
     </section>
     <footer>技术支持：杭州安鸿科技股份有限公司</footer>
@@ -1431,6 +1481,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     <th>仓号</th>
                     <th>样品编号</th>
                     <th>流程状态</th>
+                    <th>全流程信息</th>
                     <th>粮食品种</th>
                     <th>责任人</th>
                     <th>任务时间</th>
@@ -1442,6 +1493,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     <td>{{ item.warehouse }}</td>
                     <td>{{ item.sample }}</td>
                     <td><span class="process-status">{{ item.status }}</span></td>
+                    <td>{{ item.flowSummary }}</td>
                     <td>{{ shouldHideGrainType(item.status) ? '—' : item.grainType }}</td>
                     <td>{{ shouldHideOwnerAndTime(item.status) ? '—' : item.owner }}</td>
                     <td>{{ shouldHideOwnerAndTime(item.status) ? '—' : item.taskTime }}</td>
@@ -1474,12 +1526,13 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               <div class="panel-head"><h2>检化验流程总览</h2><span>数据一次录入，样品全程流转</span></div>
               <div class="flow-nodes">
                 <template v-for="(node, index) in flowNodes" :key="node.name">
-                  <div class="flow-node" :class="node.status">
+                  <button type="button" class="flow-node" :class="node.status" @click="openInspectionFlowNode(node.tab, node.action)">
                     <em>{{ String(index + 1).padStart(2, '0') }}</em>
                     <div class="flow-node-circle"><component :is="node.icon" :size="18" stroke-width="2.2" /></div>
                     <span>{{ node.name }}</span>
                     <b>{{ node.count }}</b>
-                  </div>
+                  </button>
+                  <div v-if="index < flowNodes.length - 1" class="flow-node-arrow" :class="node.status"></div>
                 </template>
               </div>
             </div>
@@ -1494,9 +1547,8 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               <div class="flow-visual-card">
                 <div class="panel-head"><h2>近期待办</h2><span>审批与送样</span></div>
                 <div class="todo-list">
-                  <button type="button"><Send :size="13" /> 53仓样品待送样</button>
-                  <button type="button"><ClipboardPenLine :size="13" /> 50仓外部扦样记录待归档</button>
-                  <button type="button"><CheckCircle2 :size="13" /> 51仓检验报告待审核</button>
+                  <button v-for="record in currentApprovalTodoRecords" :key="record.sampleNo" type="button" @click="openApprovalFlow(record.sampleNo)"><CheckCircle2 :size="13" /> {{ displaySampleNo(record) }} {{ record.approvalStep }}待审批</button>
+                  <button v-if="!currentApprovalTodoRecords.length" type="button"><CheckCircle2 :size="13" /> 当前用户暂无待审批检验报告</button>
                 </div>
               </div>
             </div>
@@ -1824,7 +1876,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             <div class="sampling-toolbar">
               <div class="module-title-block">
                 <h2>质量预警记录</h2>
-                <span>基于检验报告管理模块自动判定：0项正常不显示，1-2项质量预警，3项及以上质量报警</span>
+               
               </div>
             </div>
 
@@ -1936,7 +1988,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
         <section v-else-if="activeMenu === 'lab'" class="inspection-page">
           <div class="lab-page">
             <div class="lab-hero">
-              <div><span>检化验室数字化</span><h2>仪器管理与温湿度自动采集</h2><p>覆盖仪器台账、温湿度采集、检定校准、维护保养记录，支撑检验过程可追溯。</p></div>
+              <div><span>检化验室数字化</span><h2>仪器管理与温湿度自动采集</h2></div>
               <div class="lab-stat-grid"><div v-for="item in labStats" :key="item.label" :class="['lab-stat-card', item.tone]"><b>{{ item.value }}</b><span>{{ item.label }}</span></div></div>
             </div>
 
@@ -1996,7 +2048,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
         <section v-else-if="activeMenu === 'reagent'" class="inspection-page">
           <div class="reagent-page">
             <div class="reagent-hero">
-              <div><span>试剂全流程管控</span><h2>检化验试剂管理</h2><p>试剂库存台账、低库存采购提醒、出入库与领还记录统一管理。</p></div>
+              <div><span>试剂全流程管控</span><h2>检化验试剂管理</h2></div>
               <div class="lab-stat-grid"><div v-for="item in reagentStats" :key="item.label" :class="['lab-stat-card', item.tone]"><b>{{ item.value }}</b><span>{{ item.label }}</span></div></div>
             </div>
 
@@ -2027,7 +2079,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
 
           <div v-if="showReagentEntryForm" class="process-dialog-mask" @click.self="showReagentEntryForm = false">
             <section class="send-sample-dialog">
-              <div class="process-dialog-head"><div><h2>入库登记</h2><span>新增试剂入库</span></div><button type="button" @click="showReagentEntryForm = false"><X :size="14" /> 关闭</button></div>
+              <div class="process-dialog-head"><div><h2>入库登记</h2><span>新增试剂入库</span></div><button type="button" @click="showReagentEntryForm = false"><X :size="12" /> 关闭</button></div>
               <div class="send-form">
                 <label>试剂名称<input v-model="reagentEntryForm.name" placeholder="如：无水乙醇" /></label>
                 <label>规格<input v-model="reagentEntryForm.spec" placeholder="如：500ml/瓶" /></label>
