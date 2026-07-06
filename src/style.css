@@ -704,8 +704,8 @@ tbody tr:nth-child(even) {
   height: calc(100% - 40px);
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
+  gap: 12px;
+  padding: 14px;
   overflow: hidden;
   background: linear-gradient(180deg, #f4f9fd 0%, #f7f9fb 100%);
   border: 1px solid rgba(229, 231, 235, 0.72);
@@ -783,17 +783,17 @@ tbody tr:nth-child(even) {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 245px minmax(520px, 1fr) 265px;
-  gap: 10px;
+  grid-template-columns: minmax(280px, 0.72fr) minmax(560px, 1.55fr) minmax(300px, 0.82fr);
+  gap: 14px;
 }
 
 .dashboard-panel {
   min-height: 0;
   background: #fff;
   border: 1px solid #d9eaf4;
-  border-radius: 3px;
+  border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(35, 74, 115, 0.05);
+  box-shadow: 0 12px 26px rgba(35, 74, 115, 0.07);
 }
 
 .panel-head {
@@ -839,14 +839,14 @@ tbody tr:nth-child(even) {
 }
 
 .overview-main-card {
-  height: 86px;
-  margin: 12px;
+  height: 112px;
+  margin: 14px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   padding: 0 14px;
   border: 1px solid #dceef8;
-  border-radius: 4px;
+  border-radius: 10px;
   background: linear-gradient(135deg, #f5fbff 0%, #edf7fc 100%);
 }
 
@@ -859,7 +859,7 @@ tbody tr:nth-child(even) {
 .overview-empty {
   margin-top: 6px;
   color: #2d9cdb;
-  font-size: 20px;
+  font-size: 26px;
   font-weight: 700;
 }
 
@@ -871,19 +871,19 @@ tbody tr:nth-child(even) {
 
 .overview-card-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-  padding: 0 12px;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 0 14px;
 }
 
 .overview-card {
-  height: 58px;
+  height: 64px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   padding: 0 10px;
   border: 1px solid #edf1f5;
-  border-radius: 4px;
+  border-radius: 8px;
   background: #fbfdff;
 }
 
@@ -899,10 +899,10 @@ tbody tr:nth-child(even) {
 }
 
 .mini-chart-card {
-  margin: 12px;
-  padding: 12px;
+  margin: 14px;
+  padding: 14px;
   border: 1px solid #edf1f5;
-  border-radius: 4px;
+  border-radius: 8px;
   background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
 }
 
@@ -2039,6 +2039,31 @@ i.alarm,
 
 .destroy-table {
   min-width: 1180px;
+}
+
+.retain-table {
+  min-width: 1320px;
+}
+
+.retain-expire-select {
+  width: 86px;
+  height: 28px;
+  border: 1px solid #dcecf5;
+  border-radius: 5px;
+  background: #fff;
+  color: #142033;
+  font-size: 12px;
+}
+
+.retain-expire-status {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-weight: 700;
 }
 
 .warning-record-table th:nth-child(8),

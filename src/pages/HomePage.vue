@@ -77,6 +77,7 @@ interface SamplingRecord {
   handleTime?: string
   retainTime?: string
   destroyTime?: string
+  retainExpireDays?: number
 }
 
 interface SamplingForm {
@@ -302,6 +303,8 @@ const selectedUnqualifiedRecord = computed(() => {
 const retainRecords = computed(() => reportRecords.value.filter((item) => item.labelStatus === '留样'))
 const destroyRecords = computed(() => reportRecords.value.filter((item) => item.labelStatus === '销样'))
 
+const retainExpireOptions = [30, 60, 90]
+
 const reportUnqualifiedMap: Record<string, string[]> = {
   YP20260701010: ['水分及挥发物(%)', '酸价(KOH)/(mg/g)'],
   YP20260701012: ['水分及挥发物(%)', '黄曲霉毒素B1(μg/kg)', '酸价(KOH)/(mg/g)', '铅(mg/kg)'],
@@ -409,6 +412,37 @@ const normalizedCargoPosition = (record: SamplingRecord) => normalizeCargoPositi
 const displaySurveyNo = (record: SamplingRecord) => record.surveyNo?.trim() || `${record.reason.includes('春季') ? 'CJP' : 'QJP'}-${record.samplingDate.replace(/-/g, '')}-${record.warehouseNo}`
 
 const currentDateTimeText = () => new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-')
+
+const formatDateText = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
+const parseDateText = (value: string) => {
+  const [datePart] = value.replace(/\./g, '-').replace(/\//g, '-').split(' ')
+  const [year, month, day] = datePart.split('-').map(Number)
+  if (!year || !month || !day) return null
+  return new Date(year, month - 1, day)
+}
+
+const addDaysText = (value: string, days: number) => {
+  const date = parseDateText(value)
+  if (!date) return '—'
+  date.setDate(date.getDate() + days)
+  return formatDateText(date)
+}
+
+const retainExpireDays = (record: SamplingRecord) => record.retainExpireDays ?? 30
+
+const retainExpireDate = (record: SamplingRecord) => addDaysText(record.retainTime ?? record.handleTime ?? ledgerHandleTime(record), retainExpireDays(record))
+
+const retainExpireStatus = (record: SamplingRecord) => {
+  const expireDate = parseDateText(retainExpireDate(record))
+  if (!expireDate) return '未设置'
+  const today = parseDateText(formatDateText(new Date()))
+  if (!today) return '未设置'
+  const diffDays = Math.ceil((expireDate.getTime() - today.getTime()) / 86400000)
+  if (diffDays < 0) return `已过期 ${Math.abs(diffDays)} 天`
+  if (diffDays === 0) return '今日到期'
+  return `剩余 ${diffDays} 天`
+}
 
 const reportConclusion = (record: SamplingRecord) => {
   const count = reportUnqualifiedCount(record)
@@ -931,6 +965,7 @@ const approveReport = (sampleNo: string, action: 'pass' | 'return' | 'destroy') 
     target.labelStatus = '留样'
     target.approvalStatus = '审批通过'
     target.approvalStep = undefined
+    target.retainExpireDays = target.retainExpireDays ?? 30
     target.retainTime = target.approvalHistory?.[target.approvalHistory.length - 1]?.time
     target.handleTime = target.retainTime
   }
@@ -1092,8 +1127,8 @@ const deleteUser = (username: string) => {
 const warehouseMarkers = [
   {
     code: '49仓',
-    x: 41.8,
-    y: 14.0,
+    x: 37.8,
+    y: 20.0,
     status: 'normal',
     grainType: '小麦',
     stockQuantity: '3,260 吨',
@@ -1107,8 +1142,8 @@ const warehouseMarkers = [
   },
   {
     code: '50仓',
-    x: 45.8,
-    y: 18.0,
+    x: 43.8,
+    y: 23.6,
     status: 'warning',
     grainType: '稻谷',
     stockQuantity: '2,980 吨',
@@ -1122,8 +1157,8 @@ const warehouseMarkers = [
   },
   {
     code: '51仓',
-    x: 49.3,
-    y: 22.5,
+    x: 49.0,
+    y: 27.2,
     status: 'warning',
     grainType: '玉米',
     stockQuantity: '2,850 吨',
@@ -1137,8 +1172,8 @@ const warehouseMarkers = [
   },
   {
     code: '52仓',
-    x: 53.3,
-    y: 28.0,
+    x: 55.0,
+    y: 32.0,
     status: 'normal',
     grainType: '小麦',
     stockQuantity: '3,420 吨',
@@ -1152,8 +1187,8 @@ const warehouseMarkers = [
   },
   {
     code: '53仓',
-    x: 56.7,
-    y: 33.1,
+    x: 59.3,
+    y: 35.1,
     status: 'alarm',
     grainType: '小麦',
     stockQuantity: '3,120 吨',
@@ -1446,22 +1481,6 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             </section>
           </div>
 
-          <section class="dashboard-panel task-panel">
-            <div class="panel-head task-head">
-              <div>
-                <h2>任务看板</h2>
-              </div>
-              <button type="button" @click="showProcessDialog = true"><Layers :size="14" /> 检验流程跟踪</button>
-            </div>
-
-            <div class="task-stage-grid">
-              <button v-for="stage in taskStages" :key="stage.label" type="button" class="task-stage-card">
-                <component :is="stage.icon" :size="20" stroke-width="1.9" />
-                <span>{{ stage.label }}</span>
-                <strong>{{ stage.value }}</strong>
-              </button>
-            </div>
-          </section>
         </section>
 
         <div v-if="showProcessDialog" class="process-dialog-mask" @click.self="showProcessDialog = false">
@@ -1831,14 +1850,14 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               </div>
             </div>
             <div class="sampling-table-card">
-              <table class="sampling-table">
-                <thead><tr><th>报告编号</th><th>样品编号</th><th>样品名称</th><th>仓号</th><th>品种</th><th>留样状态</th><th>审批状态</th><th>批准时间</th><th>操作</th></tr></thead>
+              <table class="sampling-table retain-table">
+                <thead><tr><th>报告编号</th><th>样品编号</th><th>样品名称</th><th>仓号</th><th>品种</th><th>留样状态</th><th>留样期限</th><th>批准时间</th><th>过期时间</th><th>到期状态</th><th>操作</th></tr></thead>
                 <tbody>
                   <tr v-for="record in retainRecords" :key="record.sampleNo">
-                    <td>{{ record.reportNo ?? '—' }}</td><td>{{ displaySampleNo(record) }}</td><td>{{ record.sampleName }}</td><td>{{ record.warehouseNo }}</td><td>{{ record.grainType }}</td><td><span class="sampling-status"><PackageCheck :size="12" /> 留样</span></td><td>{{ record.approvalStatus ?? '审批通过' }}</td><td>{{ ledgerHandleTime(record) }}</td>
+                    <td>{{ record.reportNo ?? '—' }}</td><td>{{ displaySampleNo(record) }}</td><td>{{ record.sampleName }}</td><td>{{ record.warehouseNo }}</td><td>{{ record.grainType }}</td><td><span class="sampling-status"><PackageCheck :size="12" /> 留样</span></td><td><select v-model.number="record.retainExpireDays" class="retain-expire-select"><option v-for="days in retainExpireOptions" :key="days" :value="days">{{ days }}天</option></select></td><td>{{ ledgerHandleTime(record) }}</td><td>{{ retainExpireDate(record) }}</td><td><span class="retain-expire-status">{{ retainExpireStatus(record) }}</span></td>
                     <td><div class="sampling-actions"><button type="button" @click="openReportView(record.sampleNo)"><Eye :size="13" /> 查看质检报告</button></div></td>
                   </tr>
-                  <tr v-if="!retainRecords.length"><td colspan="9">暂无留样数据，批准人审批通过后自动生成。</td></tr>
+                  <tr v-if="!retainRecords.length"><td colspan="11">暂无留样数据，批准人审批通过后自动生成。</td></tr>
                 </tbody>
               </table>
             </div>
