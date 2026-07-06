@@ -158,6 +158,7 @@ const menuItems: MenuItem[] = [
 
 const activeMenu = ref('dashboard')
 const selectedWarehouse = ref('51仓')
+const activeWarehousePositionIndex = ref(0)
 const showProcessDialog = ref(false)
 const inspectionTab = ref('overview')
 const samplingSource = ref<'internal' | 'external'>('internal')
@@ -810,7 +811,16 @@ const handleStorageChange = (event: StorageEvent) => {
 onMounted(() => window.addEventListener('storage', handleStorageChange))
 onUnmounted(() => window.removeEventListener('storage', handleStorageChange))
 
+const warehousePositionTimer = window.setInterval(() => {
+  activeWarehousePositionIndex.value = (activeWarehousePositionIndex.value + 1) % selectedWarehousePositions.value.length
+}, 3000)
+
+onUnmounted(() => window.clearInterval(warehousePositionTimer))
+
 watch([internalSamplingRecords, externalSamplingRecords, systemUsers, deletedLabelNos], persistState, { deep: true })
+watch(selectedWarehouse, () => {
+  activeWarehousePositionIndex.value = 0
+})
 
 const openSamplingDetail = (orderNo: string) => {
   selectedSamplingNo.value = orderNo
@@ -1221,22 +1231,58 @@ const warehouseMarkers = [
     code: '53仓',
     x: 59.3,
     y: 35.1,
-    status: 'alarm',
+    status: 'normal',
     grainType: '小麦',
     stockQuantity: '3,120 吨',
     capacityRate: '86%',
-    qualityStatus: '报警',
-    qualityLevel: '待复检',
-    impurity: '1.1%',
-    latestTestTime: '2026-06-16',
-    warningCount: 3,
-    taskStatus: '待扦样',
+    qualityStatus: '正常',
+    qualityLevel: '一等',
+    impurity: '0.6%',
+    latestTestTime: '2026-06-24',
+    warningCount: 0,
+    taskStatus: '已完成',
   },
 ]
 
 const selectedWarehouseData = computed(() => {
   return warehouseMarkers.find((item) => item.code === selectedWarehouse.value) ?? warehouseMarkers[0]
 })
+
+const warehousePositionRows = (warehouse: typeof warehouseMarkers[number]) => {
+  const warehouseNo = warehouse.code.replace('仓', '')
+  const total = Number(warehouse.stockQuantity.replace(/[^0-9]/g, ''))
+  return [`${warehouseNo}仓1号货位`, `${warehouseNo}仓2号货位`].map((position, index) => {
+    const positionRecords = allSamplingRecords.value.filter((record) => normalizedCargoPosition(record) === position)
+    const latestRecord = positionRecords.find((record) => record.receiveTime) ?? positionRecords[0]
+    const completedRecords = positionRecords.filter((record) => completedReportRecords.value.includes(record))
+    const warningCount = completedRecords.filter((record) => reportUnqualifiedCount(record) > 0 && reportUnqualifiedCount(record) < 3).length
+    const alarmCount = completedRecords.filter((record) => reportUnqualifiedCount(record) >= 3).length
+    const unqualifiedSampleCount = completedRecords.filter((record) => reportUnqualifiedCount(record) > 0).length
+    return {
+      position,
+      status: alarmCount ? 'alarm' : warningCount ? 'warning' : 'normal',
+      qualityStatus: alarmCount ? '报警' : warningCount ? '预警' : '正常',
+      grainType: latestRecord?.grainType ?? warehouse.grainType,
+      stockQuantity: `${Math.round(total * (index === 0 ? 0.52 : 0.48)).toLocaleString()} 吨`,
+      qualityLevel: alarmCount ? '待复检' : warningCount ? '待复核' : warehouse.qualityLevel,
+      latestTestTime: latestRecord?.receiveTime?.slice(0, 10) ?? latestRecord?.samplingDate ?? warehouse.latestTestTime,
+      unqualifiedSampleCount,
+    }
+  })
+}
+
+const warehouseMarkerStatus = (warehouse: typeof warehouseMarkers[number]) => {
+  const rows = warehousePositionRows(warehouse)
+  if (rows.some((item) => item.status === 'alarm')) return 'alarm'
+  if (rows.some((item) => item.status === 'warning')) return 'warning'
+  return 'normal'
+}
+
+const selectedWarehousePositions = computed(() => {
+  return warehousePositionRows(selectedWarehouseData.value)
+})
+
+const selectedWarehousePositionData = computed(() => selectedWarehousePositions.value[activeWarehousePositionIndex.value % selectedWarehousePositions.value.length])
 
 const totalStock = computed(() => {
   return warehouseMarkers.reduce((total, item) => total + Number(item.stockQuantity.replace(/[^0-9]/g, '')), 0)
@@ -1407,7 +1453,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                   v-for="marker in warehouseMarkers"
                   :key="marker.code"
                   class="warehouse-marker"
-                  :class="[marker.status, { selected: selectedWarehouse === marker.code }]"
+                  :class="[warehouseMarkerStatus(marker), { selected: selectedWarehouse === marker.code }]"
                   :style="{ left: `${marker.x}%`, top: `${marker.y}%` }"
                   type="button"
                   @click="selectedWarehouse = marker.code"
@@ -1416,35 +1462,49 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 </button>
                 <aside class="warehouse-info-card" aria-live="polite">
                   <div class="warehouse-info-head">
-                    <strong>{{ selectedWarehouseData.code }}</strong>
-                    <span :class="['info-status', selectedWarehouseData.status]">
-                      {{ selectedWarehouseData.qualityStatus }}
+                    <div>
+                      <strong>{{ selectedWarehouseData.code }}</strong>
+                      <small>{{ selectedWarehousePositionData.position }}</small>
+                    </div>
+                    <span :class="['info-status', selectedWarehousePositionData.status]">
+                      {{ selectedWarehousePositionData.qualityStatus }}
                     </span>
+                  </div>
+                  <div class="warehouse-position-tabs">
+                    <button
+                      v-for="(position, index) in selectedWarehousePositions"
+                      :key="position.position"
+                      type="button"
+                      :class="{ active: activeWarehousePositionIndex === index }"
+                      @click="activeWarehousePositionIndex = index"
+                    >
+                      {{ position.position.replace(selectedWarehouseData.code, '') }}
+                    </button>
                   </div>
                   <div class="warehouse-info-grid">
                     <div>
-                      <span>仓房仓号</span>
-                      <b>{{ selectedWarehouseData.code }}</b>
-                    </div>
-                    <div>
-                      <span>粮食质量状态</span>
-                      <b>{{ selectedWarehouseData.qualityStatus }}</b>
+                      <span>货位号</span>
+                      <b>{{ selectedWarehousePositionData.position }}</b>
                     </div>
                     <div>
                       <span>粮食品种</span>
-                      <b>{{ selectedWarehouseData.grainType }}</b>
+                      <b>{{ selectedWarehousePositionData.grainType }}</b>
                     </div>
                     <div>
                       <span>最近检验时间</span>
-                      <b>{{ selectedWarehouseData.latestTestTime }}</b>
+                      <b>{{ selectedWarehousePositionData.latestTestTime }}</b>
                     </div>
                     <div>
                       <span>库存数量</span>
-                      <b>{{ selectedWarehouseData.stockQuantity }}</b>
+                      <b>{{ selectedWarehousePositionData.stockQuantity }}</b>
                     </div>
                     <div>
                       <span>粮食质量等级</span>
-                      <b>{{ selectedWarehouseData.qualityLevel }}</b>
+                      <b>{{ selectedWarehousePositionData.qualityLevel }}</b>
+                    </div>
+                    <div>
+                      <span>不合格样品数量</span>
+                      <b>{{ selectedWarehousePositionData.unqualifiedSampleCount }} 个</b>
                     </div>
                   </div>
                 </aside>
