@@ -658,21 +658,9 @@ const flowNodes = computed(() => [
   { name: '销样管理', count: destroyRecords.value.length, status: 'normal', icon: Trash2, tab: 'destroy', action: 'destroy' },
 ])
 
-const openInspectionFlowNode = (tab: string, action?: string) => {
+const openInspectionFlowNode = (tab: string) => {
   activeMenu.value = 'inspection'
   inspectionTab.value = tab
-  if (action === 'sampling') {
-    openSamplingForm('create')
-  } else if (action === 'label' && labelRecords.value[0]) {
-    openSampleLabelPrint(labelRecords.value[0].sampleNo)
-  } else if (action === 'report') {
-    const editableRecord = reportRecords.value.find((item) => canEditReportResult(item))
-    if (editableRecord) openReportForm(editableRecord.sampleNo)
-    else if (completedReportRecords.value[0]) openReportView(completedReportRecords.value[0].sampleNo)
-  } else if (action === 'approval') {
-    const approvalRecord = currentApprovalTodoRecords.value[0] ?? reportRecords.value.find((item) => item.approvalStep)
-    if (approvalRecord) openApprovalFlow(approvalRecord.sampleNo)
-  }
 }
 
 const inspectionKpis = computed(() => [
@@ -1545,7 +1533,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               <div class="panel-head"><h2>检化验流程总览</h2><span>数据一次录入，样品全程流转</span></div>
               <div class="flow-nodes">
                 <template v-for="(node, index) in flowNodes" :key="node.name">
-                  <button type="button" class="flow-node" :class="node.status" @click="openInspectionFlowNode(node.tab, node.action)">
+                  <button type="button" class="flow-node" :class="node.status" @click="openInspectionFlowNode(node.tab)">
                     <em>{{ String(index + 1).padStart(2, '0') }}</em>
                     <div class="flow-node-circle"><component :is="node.icon" :size="18" stroke-width="2.2" /></div>
                     <span>{{ node.name }}</span>
