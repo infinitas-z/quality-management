@@ -4225,7 +4225,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                       <td>{{ item.remainingDays > 0 ? `${item.remainingDays} 天后` : item.remainingDays === 0 ? '今天到期' : `已逾期 ${Math.abs(item.remainingDays)} 天` }}</td>
                       <td>
                         <div class="calibration-progress compact">
-                          <div><span>{{ item.statusLabel }}</span><em :class="item.statusTone">{{ item.statusLabel }}</em></div>
+                          <div><span>{{ item.statusLabel }}</span></div>
                           <i><b :class="item.statusTone" :style="{ width: `${item.progress}%` }"></b></i>
                         </div>
                       </td>
