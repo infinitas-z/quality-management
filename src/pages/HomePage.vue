@@ -414,6 +414,7 @@ const labelFilter = ref({ sampleName: '', source: '', sampleNo: '', labelStatus:
 const samplingFilter = ref({ orderNo: '', sampleName: '', reason: '', source: '', status: '' })
 const ledgerFilter = ref({ grainType: '', source: '', reason: '', startDate: '', endDate: '' })
 const activeQualityReport = ref('cargo')
+const activeWarehouseReportGrain = ref<'玉米' | '大豆'>('玉米')
 const labTab = ref('ledger')
 const reagentTab = ref('inventory')
 const activeInstrumentType = ref('物理检测设备')
@@ -567,6 +568,7 @@ const reportUnqualifiedMap: Record<string, string[]> = {
   YP20260705003: ['水分 (g/100g)', '色泽', '黄粒米 (%)'],
   YP20260706002: ['霉变粒率 (%)'],
   YP20260706004: ['热损伤粒率 (%)', '破碎粒率 (%)'],
+  YP20260713005: ['水分 (g/100g)', '杂质 (%)'],
 }
 
 const reportStandardMeta = (record: SamplingRecord, item: string) => activeQualityStandards(record).find((standard) => standard.item === item)
@@ -924,7 +926,54 @@ const cargoDetailRows = computed(() => completedReportRecords.value.map((record)
   unqualified: reportUnqualifiedItems(record),
 })))
 
-const warehouseReportRows = computed(() => completedReportRecords.value.map((record) => ({
+const warehouseReportGrainTabs = ['玉米', '大豆'] as const
+
+const warehouseReportIndicators: Record<typeof warehouseReportGrainTabs[number], { item: string; label: string }[]> = {
+  玉米: [
+    { item: '水分 (g/100g)', label: '水分（g/100g）' },
+    { item: '杂质 (%)', label: '杂质（%）' },
+    { item: '容重 (g/L)', label: '容重（g/L）' },
+    { item: '不完善粒总量 (%)', label: '不完善粒总量（%）' },
+    { item: '黄粒米 (%)', label: '黄粒米（%）' },
+    { item: '脂肪酸值 (mgKOH/100g)', label: '脂肪酸值（mgKOH/100g）' },
+    { item: '黄曲霉毒素B1 (μg/kg)', label: '黄曲霉毒素B1（μg/kg）' },
+    { item: '色泽、气味', label: '色泽、气味' },
+  ],
+  大豆: [
+    { item: '水分 (g/100g)', label: '水分（g/100g）' },
+    { item: '杂质 (%)', label: '杂质（%）' },
+    { item: '完整粒率 (%)', label: '完整粒率（%）' },
+    { item: '损伤粒率 (%)', label: '损伤粒率（%）' },
+    { item: '热损伤粒率 (%)', label: '热损伤粒率（%）' },
+    { item: '破碎粒率 (%)', label: '破碎粒率（%）' },
+    { item: '霉变粒率 (%)', label: '霉变粒率（%）' },
+    { item: '粗脂肪酸值 (mg/g)', label: '粗脂肪酸值（mg/g）' },
+    { item: '蛋白质含量 (g/100g)', label: '蛋白质含量（g/100g）' },
+    { item: '脂肪含量 (g/100g)', label: '脂肪含量（g/100g）' },
+    { item: '色泽、气味', label: '色泽、气味' },
+  ],
+}
+
+const activeWarehouseReportIndicators = computed(() => warehouseReportIndicators[activeWarehouseReportGrain.value])
+
+const warehouseReportIndicatorStandard = (item: string) => {
+  if (item === '色泽、气味') return '正常'
+  const standards = qualityStandards[activeWarehouseReportGrain.value]
+  return Object.values(standards).flat().find((standard) => standard.item === item)?.standard ?? '—'
+}
+
+const warehouseReportIndicatorValue = (record: SamplingRecord, item: string) => {
+  if (item === '色泽、气味') {
+    const color = qualityDetectValue(record, '色泽') || qualityResultValue(record, '色泽')
+    const odor = qualityDetectValue(record, '气味') || qualityResultValue(record, '气味')
+    return color && odor ? `${color}/${odor}` : '—'
+  }
+  return reportMeasureValue(record, [item])
+}
+
+const warehouseReportRows = computed(() => completedReportRecords.value
+  .filter((record) => record.grainType === activeWarehouseReportGrain.value)
+  .map((record) => ({
   record,
   position: normalizedCargoPosition(record),
   warehouseNo: cargoPositionWarehouseNo(normalizedCargoPosition(record)),
@@ -973,6 +1022,7 @@ const warehouseReportMeta = computed(() => {
 })
 
 const warehouseReportBlankRows = computed(() => Array.from({ length: Math.max(0, 6 - warehouseReportRows.value.length) }))
+const warehouseReportColumnCount = computed(() => activeWarehouseReportIndicators.value.length + 7)
 const cargoReportBlankRows = computed(() => Array.from({ length: Math.max(0, 6 - cargoDetailRows.value.length) }))
 const acceptanceReportBlankRows = computed(() => Array.from({ length: Math.max(0, 6 - acceptanceRows.value.length) }))
 const seasonReportBlankRows = computed(() => Array.from({ length: Math.max(0, 6 - seasonRows.value.length) }))
@@ -2061,6 +2111,58 @@ const buildDefaultReportResults = (record: SamplingRecord) => {
     return result
   }, {})
 }
+
+const createCompleteSoybeanInboundReportResults = (): Record<string, ReportResult> => ({
+  '水分 (g/100g)': { detectValue: '14.10', judgement: '不合格', inspector: '质检员A', standard: '≤13.50', type: '质量等级', isKey: true },
+  色泽: { detectValue: '正常', judgement: '合格', inspector: '质检员A', standard: '正常', type: '质量等级', isKey: true },
+  气味: { detectValue: '正常', judgement: '合格', inspector: '质检员A', standard: '正常', type: '质量等级', isKey: true },
+  '破碎粒率 (%)': { detectValue: '12.30', judgement: '合格', inspector: '质检员A', standard: '≤20.00', type: '质量等级，储存品质', isKey: false },
+  '杂质 (%)': { detectValue: '0.62', judgement: '合格', inspector: '质检员A', standard: '≤1.00', type: '质量等级', isKey: true },
+  '粗脂肪酸值 (mg/g)': { detectValue: '2.74', judgement: '合格', inspector: '质检员A', standard: '≤3.50', type: '储存品质', isKey: true },
+  '霉变粒率 (%)': { detectValue: '1.25', judgement: '不合格', inspector: '质检员A', standard: '≤1.00', type: '质量等级，储存品质', isKey: false },
+  '完整粒率 (%)': { detectValue: '82.60', judgement: '合格', inspector: '质检员A', standard: '≥75.00', type: '质量等级', isKey: true },
+  '损伤粒率 (%)': { detectValue: '5.10', judgement: '合格', inspector: '质检员A', standard: '≤8.00', type: '质量等级', isKey: true },
+  '热损伤粒率 (%)': { detectValue: '0.30', judgement: '合格', inspector: '质检员A', standard: '≤1.00', type: '质量等级', isKey: false },
+  '蛋白质含量 (g/100g)': { detectValue: '36.20', judgement: '合格', inspector: '质检员A', standard: '≥33.00', type: '质量等级，储存品质', isKey: true },
+  '赭曲霉毒素A (μg/kg)': { detectValue: '1.60', judgement: '合格', inspector: '质检员A', standard: '≤5.00', type: '卫生指标', isKey: false },
+  '镉 (mg/kg)': { detectValue: '0.08', judgement: '合格', inspector: '质检员A', standard: '≤0.20', type: '卫生指标', isKey: true },
+})
+
+const createCompleteCornSeasonReportResults = (): Record<string, ReportResult> => {
+  const detectValues: Record<string, string> = {
+    '镉 (mg/kg)': '0.04',
+    '黄粒米 (%)': '0.36',
+    '水分 (g/100g)': '13.20',
+    '黄曲霉毒素B1 (μg/kg)': '2.10',
+    色泽: '正常',
+    气味: '正常',
+    '脂肪酸值 (mgKOH/100g)': '32.60',
+    '杂质 (%)': '0.48',
+    '铅 (mg/kg)': '0.09',
+    '无机砷 (mg/kg)': '0.05',
+    '三唑磷 (mg/kg)': '0.01',
+    '毒死蜱 (mg/kg)': '0.02',
+    '马拉硫磷 (mg/kg)': '0.20',
+    '水胺硫磷 (mg/kg)': '0.01',
+    '谷外糙米 (%)': '1.10',
+    '磷化物 (mg/kg)': '0.01',
+    '品尝评分值 (分)': '82.00',
+    '汞 (mg/kg)': '0.005',
+  }
+
+  return activeQualityStandards({ grainType: '玉米', reason: '秋季普检' }).reduce<Record<string, ReportResult>>((result, standard) => {
+    result[standard.item] = {
+      detectValue: detectValues[standard.item],
+      judgement: '合格',
+      inspector: '质检员A',
+      standard: standard.standard,
+      type: standard.type,
+      isKey: standard.isKey,
+    }
+    return result
+  }, {})
+}
+
 const inspectionTabs = [
   { key: 'overview', label: '流程总览' },
   { key: 'sampling', label: '扦样单管理' },
@@ -2073,25 +2175,64 @@ const inspectionTabs = [
 
 const qualityWarningTestRecords: SamplingRecord[] = [
   { orderNo: 'QY20260705001', sampleNo: 'YP20260705001', sampleName: '49仓玉米一级预警测试样品', sampleCount: '2kg × 4', sampler: '张三', samplingDate: '2026-07-05', source: '内部扦样', status: '已收样', labelStatus: '检毕', sampleUnit: 'kg', approvalStatus: '审批中', approvalStep: '编制人', reason: '入库初检', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-18', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '49仓1号货位', sender: '张三', sendTime: '2026-07-05 09:00', receiver: '质检员A', receiveTime: '2026-07-05 09:30', reportNo: 'ZJBG-NB-20260705001', reportMeta: { category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '一级预警测试数据：普通不合格2项。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-05 10:10' }], reportResults: buildDefaultReportResults({ sampleNo: 'YP20260705001', grainType: '玉米', reason: '入库初检' } as SamplingRecord) },
-  { orderNo: 'QY20260705002', sampleNo: 'YP20260705002', sampleName: '50仓大豆二级预警测试样品', sampleCount: '2kg × 4', sampler: '李四', samplingDate: '2026-07-05', source: '内部扦样', status: '已收样', labelStatus: '检毕', sampleUnit: 'kg', approvalStatus: '审批中', approvalStep: '审核人', reason: '入库验收', grainType: '大豆', warehouseNo: '50', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '黑龙江', productionYear: '2026', storageDate: '2026-06-20', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '50仓1号货位', sender: '李四', sendTime: '2026-07-05 10:00', receiver: '质检员A', receiveTime: '2026-07-05 10:30', reportNo: 'ZJBG-NB-20260705002', reportMeta: { category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '二级预警测试数据：关键不合格1项、普通不合格1项。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-05 11:10' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-05 11:30' }], reportResults: buildDefaultReportResults({ sampleNo: 'YP20260705002', grainType: '大豆', reason: '入库验收' } as SamplingRecord) },
+  { orderNo: 'QY20260705002', sampleNo: 'YP20260705002', sampleName: '50仓大豆二级预警测试样品', sampleCount: '2kg × 4', sampler: '李四', samplingDate: '2026-07-05', source: '内部扦样', status: '已收样', labelStatus: '检毕', sampleUnit: 'kg', approvalStatus: '审批中', approvalStep: '审核人', reason: '入库验收', grainType: '大豆', warehouseNo: '50', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '黑龙江', productionYear: '2026', storageDate: '2026-06-20', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '50仓1号货位', sender: '李四', sendTime: '2026-07-05 10:00', receiver: '质检员A', receiveTime: '2026-07-05 10:30', reportNo: 'ZJBG-NB-20260705002', reportMeta: { category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '二级预警测试数据：关键不合格1项、普通不合格1项。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-05 11:10' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-05 11:30' }], reportResults: createCompleteSoybeanInboundReportResults() },
   { orderNo: 'QY20260705003', sampleNo: 'YP20260705003', sampleName: '49仓玉米三级预警测试样品', sampleCount: '2kg × 4', sampler: '王五', samplingDate: '2026-07-05', source: '内部扦样', status: '已收样', labelStatus: '检毕', sampleUnit: 'kg', approvalStatus: '审批中', approvalStep: '批准人', reason: '入库初检', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-22', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '49仓1号货位', sender: '王五', sendTime: '2026-07-05 11:00', receiver: '质检员A', receiveTime: '2026-07-05 11:30', reportNo: 'ZJBG-NB-20260705003', reportMeta: { category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '三级预警测试数据：关键不合格2项、普通不合格1项。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-05 12:10' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-05 12:30' }, { title: '审核人：审批通过/同意', user: '李审核（审核人）', time: '2026-07-05 13:00' }], reportResults: buildDefaultReportResults({ sampleNo: 'YP20260705003', grainType: '玉米', reason: '入库初检' } as SamplingRecord) },
   { orderNo: 'QY20260706001', sampleNo: 'YP20260706001', sampleName: '49仓玉米春季普检样品', sampleCount: '2kg × 4', sampler: '张三', samplingDate: '2026-07-06', source: '内部扦样', status: '已收样', labelStatus: '检毕', sampleUnit: 'kg', approvalStatus: '审批通过', reason: '春季普检', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-18', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '49仓1号货位', surveyNo: 'CJP-20260706-49', sender: '张三', sendTime: '2026-07-06 09:00', receiver: '质检员A', receiveTime: '2026-07-06 09:30', reportNo: 'ZJBG-NB-20260706001', reportMeta: { category: '春季普检', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '春季普检测试数据，检测指标采用出库检测标准。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-06 10:10' }, { title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-06 11:00' }], reportResults: buildDefaultReportResults({ sampleNo: 'YP20260706001', grainType: '玉米', reason: '春季普检' } as SamplingRecord) },
   { orderNo: 'QY20260706002', sampleNo: 'YP20260706002', sampleName: '50仓大豆春季普检样品', sampleCount: '2kg × 4', sampler: '李四', samplingDate: '2026-07-06', source: '内部扦样', status: '已收样', labelStatus: '检毕', sampleUnit: 'kg', approvalStatus: '审批通过', reason: '春季普检', grainType: '大豆', warehouseNo: '50', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '黑龙江', productionYear: '2026', storageDate: '2026-06-20', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '50仓1号货位', surveyNo: 'CJP-20260706-50', sender: '李四', sendTime: '2026-07-06 10:00', receiver: '质检员A', receiveTime: '2026-07-06 10:30', reportNo: 'ZJBG-NB-20260706002', reportMeta: { category: '春季普检', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '春季普检测试数据：普通不合格1项，检测指标采用出库检测标准。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-06 11:10' }, { title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-06 12:00' }], reportResults: buildDefaultReportResults({ sampleNo: 'YP20260706002', grainType: '大豆', reason: '春季普检' } as SamplingRecord) },
   { orderNo: 'QY20260706003', sampleNo: 'YP20260706003', sampleName: '49仓玉米秋季普检样品', sampleCount: '2kg × 4', sampler: '王五', samplingDate: '2026-07-06', source: '内部扦样', status: '已收样', labelStatus: '留样', sampleUnit: 'kg', approvalStatus: '审批通过', reason: '秋季普检', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-22', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '49仓1号货位', surveyNo: 'QJP-20260706-49', sender: '王五', sendTime: '2026-07-06 13:00', receiver: '质检员A', receiveTime: '2026-07-06 13:30', reportNo: 'ZJBG-NB-20260706003', reportMeta: { category: '秋季普检', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '秋季普检测试数据，检测指标采用出库检测标准。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-06 14:10' }, { title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-06 15:00' }], retainTime: '2026-07-06 15:00', retainExpireDays: 30, reportResults: buildDefaultReportResults({ sampleNo: 'YP20260706003', grainType: '玉米', reason: '秋季普检' } as SamplingRecord) },
   { orderNo: 'QY20260706004', sampleNo: 'YP20260706004', sampleName: '50仓大豆秋季普检样品', sampleCount: '2kg × 4', sampler: '赵六', samplingDate: '2026-07-06', source: '内部扦样', status: '已收样', labelStatus: '检毕', sampleUnit: 'kg', approvalStatus: '审批中', approvalStep: '审核人', reason: '秋季普检', grainType: '大豆', warehouseNo: '50', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '黑龙江', productionYear: '2026', storageDate: '2026-06-25', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '50仓1号货位', surveyNo: 'QJP-20260706-50', sender: '赵六', sendTime: '2026-07-06 15:00', receiver: '质检员A', receiveTime: '2026-07-06 15:30', reportNo: 'ZJBG-NB-20260706004', reportMeta: { category: '秋季普检', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '秋季普检测试数据：关键不合格2项，检测指标采用出库检测标准。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-06 16:10' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-06 16:30' }], reportResults: buildDefaultReportResults({ sampleNo: 'YP20260706004', grainType: '大豆', reason: '秋季普检' } as SamplingRecord) },
+  { orderNo: 'QY20260712001', sampleNo: 'YP20260712001', sampleName: '49仓玉米秋季普检完整测试样品', sampleCount: '2kg × 4', sampler: '张三', samplingDate: '2026-07-12', source: '内部扦样', status: '已收样', labelStatus: '检毕', sampleUnit: 'kg', approvalStatus: '审批通过', reason: '秋季普检', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-24', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '49仓1号货位', surveyNo: 'QJP-20260712-49', sender: '张三', sendTime: '2026-07-12 09:00', receiver: '质检员A', receiveTime: '2026-07-12 09:30', reportNo: 'ZJBG-NB-20260712001', reportMeta: { category: '秋季普检', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '完整测试数据：出库检测标准项均已录入，综合判定合格。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-12 10:10' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-12 10:30' }, { title: '审核人：审批通过/同意', user: '李审核（审核人）', time: '2026-07-12 10:50' }, { title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-12 11:10' }], reportResults: createCompleteCornSeasonReportResults() },
+]
+
+const createWorkflowStatusTestRecord = (overrides: Partial<SamplingRecord>): SamplingRecord => ({
+  orderNo: '',
+  sampleNo: '',
+  sampleName: '质量流程测试样品',
+  sampleCount: '2kg × 4',
+  sampleUnit: 'kg',
+  sampler: '张三',
+  samplingDate: '2026-07-13',
+  source: '内部扦样',
+  status: '录入中',
+  reason: '入库初检',
+  grainType: '玉米',
+  warehouseNo: '49',
+  company: '中央储备粮镇江直属库有限公司',
+  depot: '安鸿智慧粮库',
+  representativeQuantity: '100.000',
+  nature: '中央储备粮',
+  origin: '江苏',
+  productionYear: '2026',
+  storageDate: '2026-06-26',
+  packageType: '散装',
+  retainCount: '1',
+  inspectionCount: '1',
+  totalCopies: '2',
+  keeper: '王保管',
+  cargoPosition: '49仓1号货位',
+  ...overrides,
+})
+
+const workflowStatusTestRecords: SamplingRecord[] = [
+  createWorkflowStatusTestRecord({ orderNo: 'QY20260713001', sampleNo: 'YP20260713001', sampleName: '49仓玉米录入中测试样品', status: '录入中', remark: '用于验证扦样单录入中状态。' }),
+  createWorkflowStatusTestRecord({ orderNo: 'QY20260713002', sampleNo: 'YP20260713002', sampleName: '50仓大豆扦样完成测试样品', status: '扦样完成', grainType: '大豆', warehouseNo: '50', origin: '黑龙江', cargoPosition: '50仓1号货位', sampler: '李四', remark: '用于验证扦样完成待送样状态。' }),
+  createWorkflowStatusTestRecord({ orderNo: 'QY20260713003', sampleNo: 'YP20260713003', sampleName: '49仓玉米已送样测试样品', status: '已送样', sender: '王五', sendTime: '2026-07-13 09:10', remark: '用于验证已送样待收样状态。' }),
+  createWorkflowStatusTestRecord({ orderNo: 'QY20260713004', sampleNo: 'YP20260713004', sampleName: '50仓大豆留样测试样品', status: '已收样', labelStatus: '留样', approvalStatus: '审批通过', reason: '入库验收', grainType: '大豆', warehouseNo: '50', origin: '黑龙江', cargoPosition: '50仓1号货位', sampler: '李四', sender: '李四', sendTime: '2026-07-13 09:20', receiver: '质检员A', receiveTime: '2026-07-13 09:45', reportNo: 'ZJBG-NB-20260713004', reportMeta: { category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '审批通过后留样，留样状态测试数据。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-13 10:10' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-13 10:25' }, { title: '审核人：审批通过/同意', user: '李审核（审核人）', time: '2026-07-13 10:40' }, { title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-13 11:00' }], retainTime: '2026-07-13 11:00', handleTime: '2026-07-13 11:00', retainExpireDays: 60, reportResults: buildDefaultReportResults({ grainType: '大豆', reason: '入库验收' } as SamplingRecord) }),
+  createWorkflowStatusTestRecord({ orderNo: 'QY20260713005', sampleNo: 'YP20260713005', sampleName: '49仓玉米销样测试样品', status: '已收样', labelStatus: '销样', approvalStatus: '销样', reason: '入库初检', sender: '赵六', sendTime: '2026-07-13 10:00', receiver: '质检员A', receiveTime: '2026-07-13 10:30', reportNo: 'ZJBG-NB-20260713005', reportMeta: { category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '水分、杂质不合格，批准人不同意并转销样。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-13 11:10' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-13 11:25' }, { title: '审核人：审批通过/同意', user: '李审核（审核人）', time: '2026-07-13 11:40' }, { title: '批准人：不同意，转销样', user: '赵批准（批准人）', time: '2026-07-13 12:00' }], destroyTime: '2026-07-13 12:00', handleTime: '2026-07-13 12:00', reportResults: buildDefaultReportResults({ sampleNo: 'YP20260713005', grainType: '玉米', reason: '入库初检' } as SamplingRecord) }),
 ]
 
 const internalSamplingRecords = ref<SamplingRecord[]>([
   { orderNo: 'QY20260704001', sampleNo: 'YP20260704001', sampleName: '49仓玉米入库初检样品', sampleCount: '2kg × 4', sampler: '张三', samplingDate: '2026-07-04', source: '内部扦样', status: '已收样', labelStatus: '在检', sampleUnit: 'kg', approvalStatus: '未提交', reason: '入库初检', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-17', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '49仓1号货位', sender: '张三', sendTime: '2026-07-04 10:00', receiver: '质检员A', receiveTime: '2026-07-04 10:30', reportResults: buildDefaultReportResults({ sampleNo: 'YP20260704001', grainType: '玉米', reason: '入库初检' } as SamplingRecord) },
   { orderNo: 'QY20260704002', sampleNo: 'YP20260704002', sampleName: '50仓大豆入库验收样品', sampleCount: '2kg × 4', sampler: '李四', samplingDate: '2026-07-04', source: '内部扦样', status: '已收样', labelStatus: '待检', sampleUnit: 'kg', reason: '入库验收', grainType: '大豆', warehouseNo: '50', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '黑龙江', productionYear: '2026', storageDate: '2026-06-20', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '50仓1号货位', sender: '李四', sendTime: '2026-07-04 11:00', receiver: '质检员A', receiveTime: '2026-07-04 11:30' },
   ...qualityWarningTestRecords,
+  ...workflowStatusTestRecords,
 ])
 
 const externalSamplingRecords = ref<SamplingRecord[]>([])
 
 const ensureQualityWarningTestRecords = () => {
   const existingSampleNos = new Set(internalSamplingRecords.value.map((record) => record.sampleNo))
-  qualityWarningTestRecords.forEach((record) => {
+  ;[...qualityWarningTestRecords, ...workflowStatusTestRecords].forEach((record) => {
     if (!existingSampleNos.has(record.sampleNo)) {
       internalSamplingRecords.value.push(record)
     }
@@ -3014,7 +3155,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 <div class="grain-share-card">
                   <div class="donut-chart" aria-label="粮食品种占比环形图"></div>
                   <div class="grain-share-legend">
-                    <span><i class="wheat"></i>小麦 60%</span>
+                    <span><i class="wheat"></i>玉米 60%</span>
                     <span><i class="soybean"></i>大豆 40%</span>
                   </div>
                 </div>
@@ -3401,10 +3542,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               </div>
             </div>
 
-            <div class="ledger-version-tabs">
-              <button class="active" type="button">新版</button>
-              <button type="button">旧版</button>
-            </div>
+          
 
             <div class="ledger-sheet-wrap">
               <table class="ledger-sheet-table">
@@ -3734,7 +3872,18 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             <div class="quality-report-sheet" v-else-if="activeQualityReport === 'warehouse'">
               <div class="report-sheet-head"><div><h3>分货位质量汇总表</h3><span>自动生成编号：ZL-FHW-20260703</span></div><button type="button" @click="printPage"><Printer :size="13" /> 打印</button></div>
               <section class="warehouse-record-paper warehouse-summary-record-paper">
-                <h2>{{ warehouseReportMeta.grainTypes }}分货位质量检测记录表</h2>
+                <div class="warehouse-grain-tabs" role="tablist" aria-label="粮食品种">
+                  <button
+                    v-for="grain in warehouseReportGrainTabs"
+                    :key="grain"
+                    :class="{ active: activeWarehouseReportGrain === grain }"
+                    type="button"
+                    role="tab"
+                    :aria-selected="activeWarehouseReportGrain === grain"
+                    @click="activeWarehouseReportGrain = grain"
+                  >{{ grain }}</button>
+                </div>
+                <h2>{{ activeWarehouseReportGrain }}分货位质量检测记录表</h2>
                 <div class="warehouse-record-meta">
                   <span>直属企业：{{ warehouseReportMeta.enterprise }}</span>
                   <span>储粮性质：{{ warehouseReportMeta.nature }}</span>
@@ -3744,16 +3893,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                   <colgroup>
                     <col class="warehouse-col-position" />
                     <col class="warehouse-col-date" />
-                    <col class="warehouse-col-small" />
-                    <col class="warehouse-col-small" />
-                    <col class="warehouse-col-small" />
-                    <col class="warehouse-col-small" />
-                    <col class="warehouse-col-medium" />
-                    <col class="warehouse-col-medium" />
-                    <col class="warehouse-col-medium" />
-                    <col class="warehouse-col-medium" />
-                    <col class="warehouse-col-medium" />
-                    <col class="warehouse-col-mold" />
+                    <col v-for="indicator in activeWarehouseReportIndicators" :key="indicator.item" class="warehouse-col-indicator" />
                     <col class="warehouse-col-agency" />
                     <col class="warehouse-col-report" />
                     <col class="warehouse-col-recorder" />
@@ -3764,48 +3904,27 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     <tr class="warehouse-record-base">
                       <th>数量（吨）</th><td>{{ warehouseReportMeta.totalQuantity }}</td>
                       <th>等级</th><td>{{ warehouseReportMeta.grade }}</td>
-                      <th>入库时间</th><td>{{ warehouseReportMeta.storageDate }}</td>
                       <th>产地</th><td>{{ warehouseReportMeta.origin }}</td>
-                      <th>生产/进口年限</th><td>{{ warehouseReportMeta.productionYear }}</td>
-                      <th>保管方式</th><td colspan="6">{{ warehouseReportMeta.packageType }}</td>
+                      <th>适用标准</th><td :colspan="warehouseReportColumnCount - 7">{{ activeWarehouseReportGrain }}质量检验标准</td>
                     </tr>
                     <tr>
-                      <th rowspan="2">仓（货位）号</th>
-                      <th rowspan="2">检测日期</th>
-                      <th rowspan="2">水分<br />（g/100g）</th>
-                      <th rowspan="2">杂质<br />（%）</th>
-                      <th rowspan="2">完整粒率<br />（%）</th>
-                      <th colspan="2">破损粒率（%）</th>
-                      <th rowspan="2">蛋白质指标<br />（%）</th>
-                      <th rowspan="2">粗脂肪酸值<br />（mg/g）</th>
-                      <th rowspan="2">脂肪含量<br />（g/100g）</th>
-                      <th rowspan="2">色泽、气味</th>
-                      <th rowspan="2">霉变粒率<br />（%）</th>
-                      <th rowspan="2">检测机构</th>
-                      <th rowspan="2">质检报告编号</th>
-                      <th rowspan="2">记录人</th>
-                      <th rowspan="2">检测目的</th>
-                      <th rowspan="2">备注</th>
-                    </tr>
-                    <tr>
-                      <th>合计</th>
-                      <th>其中：热损伤粒率</th>
+                      <th>仓（货位）号</th>
+                      <th>检测日期</th>
+                      <th v-for="indicator in activeWarehouseReportIndicators" :key="indicator.item">
+                        {{ indicator.label }}<small>标准：{{ warehouseReportIndicatorStandard(indicator.item) }}</small>
+                      </th>
+                      <th>检测机构</th>
+                      <th>质检报告编号</th>
+                      <th>记录人</th>
+                      <th>检测目的</th>
+                      <th>备注</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr v-for="row in warehouseReportRows" :key="row.record.sampleNo">
                       <td>{{ row.position }}</td>
                       <td>{{ row.detectDate }}</td>
-                      <td>{{ row.moisture }}</td>
-                      <td>{{ row.impurity }}</td>
-                      <td>{{ row.completeRate }}</td>
-                      <td>{{ row.damageRate }}</td>
-                      <td>{{ row.heatDamageRate }}</td>
-                      <td>{{ row.proteinRatio }}</td>
-                      <td>{{ row.crudeFattyAcid }}</td>
-                      <td>{{ row.fatContent }}</td>
-                      <td>{{ row.colorOdor }}</td>
-                      <td>{{ row.moldRate }}</td>
+                      <td v-for="indicator in activeWarehouseReportIndicators" :key="indicator.item">{{ warehouseReportIndicatorValue(row.record, indicator.item) }}</td>
                       <td>{{ row.agency }}</td>
                       <td>{{ row.reportNo }}</td>
                       <td>{{ row.recorder }}</td>
@@ -3813,7 +3932,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                       <td>{{ row.remark }}</td>
                     </tr>
                     <tr v-for="(_, index) in warehouseReportBlankRows" :key="`warehouse-blank-${index}`" class="warehouse-record-blank-row">
-                      <td v-for="cell in 17" :key="cell"></td>
+                      <td v-for="cell in warehouseReportColumnCount" :key="cell"></td>
                     </tr>
                   </tbody>
                 </table>

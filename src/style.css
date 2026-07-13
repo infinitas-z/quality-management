@@ -2934,6 +2934,33 @@ i.alarm,
   font-size: 24px;
 }
 
+.warehouse-grain-tabs {
+  display: inline-flex;
+  margin-bottom: 12px;
+  border: 1px solid #b9dce8;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.warehouse-grain-tabs button {
+  min-width: 88px;
+  height: 30px;
+  border: 0;
+  border-right: 1px solid #b9dce8;
+  background: #fff;
+  color: #526171;
+  font-weight: 700;
+}
+
+.warehouse-grain-tabs button:last-child {
+  border-right: 0;
+}
+
+.warehouse-grain-tabs button.active {
+  background: #e9f8fc;
+  color: #087b9e;
+}
+
 .warehouse-summary-record-paper .warehouse-record-meta {
   margin-bottom: 6px;
   font-size: 13px;
@@ -2961,6 +2988,18 @@ i.alarm,
   font-size: 13px;
 }
 
+.warehouse-summary-record-table thead tr:not(.warehouse-record-base) th {
+  height: 62px;
+}
+
+.warehouse-summary-record-table thead small {
+  display: block;
+  margin-top: 3px;
+  color: #526171;
+  font-size: 11px;
+  font-weight: 400;
+}
+
 .warehouse-summary-record-table .warehouse-record-blank-row td {
   height: 34px;
 }
@@ -2975,6 +3014,10 @@ i.alarm,
 
 .warehouse-col-small {
   width: 60px;
+}
+
+.warehouse-col-indicator {
+  width: 90px;
 }
 
 .warehouse-col-medium {
@@ -3789,6 +3832,26 @@ i.alarm,
   background: #fff;
 }
 
+.env-panel {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.env-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.env-panel::-webkit-scrollbar-thumb {
+  border: 2px solid #fff;
+  border-radius: 8px;
+  background: #b8ccd9;
+}
+
+.env-panel::-webkit-scrollbar-track {
+  background: #f6fafc;
+}
+
 .calibration-scroll {
   min-height: 0;
   padding: 0 14px 14px;
@@ -3982,7 +4045,7 @@ i.alarm,
 .env-filter-row select,
 .env-status-row select {
   width: 164px;
-  height: 30px;
+  height: 34px;
   border: 1px solid #dce3ea;
   border-radius: 4px;
   color: #172033;
@@ -3996,7 +4059,7 @@ i.alarm,
 }
 
 .env-alarm-tabs button {
-  height: 30px;
+  height: 34px;
   padding: 0 10px;
   border: 1px solid #d9e5ee;
   border-radius: 4px;
@@ -4037,7 +4100,7 @@ i.alarm,
   align-items: center;
   flex-wrap: wrap;
   gap: 10px 12px;
-  padding: 0 14px 10px;
+  padding: 6px 14px 14px;
 }
 
 .env-status-row label {
@@ -4089,11 +4152,11 @@ i.alarm,
 }
 
 .env-trend-chart {
+  flex: 0 0 auto;
   position: relative;
   margin: 0 14px 10px;
-  padding: 14px 14px 12px;
-  overflow-x: auto;
-  overflow-y: hidden;
+  padding: 12px 14px 8px;
+  overflow: hidden;
   border: 1px solid #dff0f8;
   border-radius: 8px;
   background: linear-gradient(180deg, #ffffff 0%, #f8fcff 100%);
@@ -4140,9 +4203,9 @@ i.alarm,
 }
 
 .env-trend-chart svg {
-  width: max(100%, 1280px);
-  min-width: 1280px;
-  height: 300px;
+  width: 100%;
+  min-width: 0;
+  height: 280px;
   display: block;
 }
 
@@ -4210,9 +4273,11 @@ i.alarm,
 }
 
 .env-record-list {
+  flex: 1 1 0;
+  min-height: 200px;
   padding: 0 12px 12px;
   overflow: auto;
-  max-height: 228px;
+  max-height: none;
 }
 
 .env-record-list div {
@@ -4220,7 +4285,7 @@ i.alarm,
   grid-template-columns: 120px 1fr 90px 70px;
   align-items: center;
   gap: 8px;
-  min-height: 34px;
+  min-height: 42px;
   border-bottom: 1px solid #edf1f5;
 }
 
