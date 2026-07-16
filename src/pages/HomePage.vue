@@ -8,10 +8,13 @@ import {
   ChevronDown,
   ChevronRight,
   CircleUserRound,
+  Copy,
   CornerDownLeft,
+  Crosshair,
   Download,
   ClipboardList,
   ClipboardPenLine,
+  Clock3,
   Edit3,
   Eye,
   Grid2X2,
@@ -23,6 +26,7 @@ import {
   Plus,
   Printer,
   Route,
+  RotateCcw,
   Search,
   Send,
   Settings,
@@ -51,11 +55,14 @@ interface SamplingRecord {
   grainType: string
   warehouseNo: string
   company: string
+  labelPrintStatus?: '未打印' | '已打印'
   depot: string
   sender?: string
   sendTime?: string
   receiver?: string
   receiveTime?: string
+  inspectionScanTime?: string
+  scanOperator?: string
   labelStatus?: string
   approvalStatus?: string
   approvalStep?: string
@@ -80,6 +87,23 @@ interface SamplingRecord {
   retainTime?: string
   destroyTime?: string
   retainExpireDays?: number
+  retainExpireAt?: string
+  retainRecordId?: string
+  retainApprovalStatus?: string
+  retainApprovalStep?: '审核人' | '负责人' | '批准人' | '确认留样'
+  retainApprovalHistory?: ApprovalHistory[]
+  retainSampleStatus?: string
+  retainHandlingMethod?: string
+  retainDisposalTime?: string
+  retainSpecification?: string
+  destroyRecordId?: string
+  destroySourceRetainId?: string
+  destroyApprovalStatus?: string
+  destroyApprovalStep?: '审核人' | '负责人' | '批准人' | '确认销样'
+  destroyApprovalHistory?: ApprovalHistory[]
+  destroyVariety?: string
+  destroySource?: string
+  warehouseMapSample?: boolean
 }
 
 interface SamplingForm {
@@ -103,7 +127,6 @@ interface SamplingForm {
   packageType: string
   retainCount: string
   inspectionCount: string
-  totalCopies: string
   keeper: string
   remark: string
   cargoPosition: string
@@ -116,12 +139,15 @@ interface ReportMeta {
   reviewer: string
   approver: string
   remark: string
+  qualityGrade?: string
+  qualified?: '是' | '否' | ''
 }
 
 interface ApprovalHistory {
   title: string
   user: string
   time: string
+  opinion?: string
 }
 
 interface ReportResult {
@@ -131,6 +157,9 @@ interface ReportResult {
   standard?: string
   type?: string
   isKey?: boolean
+  instrumentCode?: string
+  instrumentName?: string
+  capturedAt?: string
 }
 
 interface QualityStandard {
@@ -151,6 +180,8 @@ interface UnqualifiedItem {
 
 type QualityRiskCode = 'normal' | 'level1' | 'level2' | 'level3'
 type InspectionOverviewDrilldown = 'sampling' | 'pending' | 'approval' | 'retain' | 'destroy'
+type InspectionTodoCategory = 'send' | 'receive' | 'inspect' | 'result' | 'approval' | 'destroy'
+type ReportViewMode = 'result' | 'report'
 
 interface SystemUser {
   username: string
@@ -291,9 +322,16 @@ interface EnvironmentChartPoint {
   humidityY: number
 }
 
+interface WarehouseMarkerCoordinate {
+  x: number
+  y: number
+}
+
 interface PersistedState {
   internalSamplingRecords: SamplingRecord[]
   externalSamplingRecords: SamplingRecord[]
+  retainRecords?: SamplingRecord[]
+  destroyRecords?: SamplingRecord[]
   systemUsers: SystemUser[]
   deletedLabelNos: string[]
   reagentStocks?: ReagentStock[]
@@ -313,24 +351,54 @@ const menuItems: MenuItem[] = [
 const activeMenu = ref('dashboard')
 const selectedWarehouse = ref('51仓')
 const activeWarehousePositionIndex = ref(0)
+const warehouseMapShell = ref<HTMLElement | null>(null)
+const warehouseMapCalibrationMode = ref(false)
+const warehouseMapCalibrationHover = ref<WarehouseMarkerCoordinate | null>(null)
+const warehouseMapCalibrationSelectedIndex = ref<number | null>(null)
+const warehouseMapCalibrationDragIndex = ref<number | null>(null)
+const warehouseMapCalibrationNotice = ref('')
 const showProcessDialog = ref(false)
 const inspectionTab = ref('overview')
 const inspectionOverviewDrilldown = ref<InspectionOverviewDrilldown | null>(null)
+const inspectionTodoDialog = ref<InspectionTodoCategory | null>(null)
 const inspectionOverviewTodayDate = ref('2026-07-04')
 const inspectionOverviewFilters = ref({ keyword: '', warehouseNo: '', source: '', reason: '', retainStatus: '' })
 const samplingSource = ref<'internal' | 'external'>('internal')
-const samplingReason = ref('入库初检')
+const samplingReason = ref('入库验收')
 const showSamplingForm = ref(false)
 const showSamplingDetail = ref(false)
 const showSamplingPreview = ref(false)
 const showSamplingLabel = ref(false)
 const showSendSample = ref(false)
 const showReceiveSample = ref(false)
+const showInspectionScanDialog = ref(false)
+const inspectionScanValue = ref('')
 const showReportForm = ref(false)
+const showInstrumentDataDialog = ref(false)
+const selectedInstrumentCodes = ref<string[]>([])
+const showConfirmDialog = ref(false)
+const confirmDialog = ref({ title: '操作确认', message: '', confirmText: '确认', danger: false })
+const pendingConfirmAction = ref<(() => void) | null>(null)
 const showReportView = ref(false)
+const reportViewMode = ref<ReportViewMode>('report')
 const showApprovalFlow = ref(false)
-const showRetainExpireForm = ref(false)
-const retainExpireForm = ref({ sampleNo: '', retainTime: '', days: 30 })
+const approvalOpinion = ref('')
+const showRetainScanDialog = ref(false)
+const retainScanValue = ref('')
+const showRetainForm = ref(false)
+const showRetainApprovalFlow = ref(false)
+const selectedRetainRecordNo = ref('')
+const retainApprovalOpinion = ref('')
+const retainForm = ref({ recordId: '', sampleNo: '', sampleName: '', sampleDate: '', sampleCount: '', sampleUnit: 'kg', specification: '', warehouseNo: '', cargoPosition: '', expireAt: '', sampleStatus: '待审批', handlingMethod: '留存', disposalTime: '', sourceRecordNo: '', remark: '' })
+const internalRetainRecords = ref<SamplingRecord[]>([])
+const internalDestroyRecords = ref<SamplingRecord[]>([])
+const showDestroyForm = ref(false)
+const showDestroyApprovalFlow = ref(false)
+const selectedDestroyRecordNo = ref('')
+const destroyApprovalOpinion = ref('')
+const destroyForm = ref({ recordId: '', sourceRetainId: '', sampleNo: '', sampleName: '', warehouseNo: '', cargoPosition: '', specification: '', variety: '', destroySource: '留样到期', remark: '' })
+const upcomingBusinessDialog = ref<'retain' | 'destroy' | null>(null)
+const upcomingBusinessRecord = ref<SamplingRecord | null>(null)
 
 const showInstrumentCategoryForm = ref(false)
 const showInstrumentEntryForm = ref(false)
@@ -403,14 +471,13 @@ const reagentEntryForm = ref<ReagentProcessForm>({
   remark: '',
 })
 
-const reportFilters = ref({ sampleNo: '', sampleName: '', labelStatus: '', approvalStatus: '' })
+const reportFilters = ref({ sampleNo: '', sampleName: '', processStatus: '' })
 const showUnqualifiedDialog = ref(false)
 const showUserForm = ref(false)
 const selectedSamplingNo = ref('QY20260701001')
-const selectedLabelStatus = ref('待检')
 const deletedLabelNos = ref<string[]>([])
 const loginError = ref('')
-const labelFilter = ref({ sampleName: '', source: '', sampleNo: '', labelStatus: '' })
+const labelFilter = ref({ sampleName: '', source: '', sampleNo: '', printStatus: '' })
 const samplingFilter = ref({ orderNo: '', sampleName: '', reason: '', source: '', status: '' })
 const ledgerFilter = ref({ grainType: '', source: '', reason: '', startDate: '', endDate: '' })
 const activeQualityReport = ref('cargo')
@@ -430,15 +497,16 @@ const environmentChartLabelY = 306
 const loginForm = ref({ username: 'wangshuai', password: '123456' })
 const currentLoginUser = ref<SystemUser | null>(null)
 const samplingFormMode = ref<'create' | 'edit'>('create')
-const samplingForm = ref<SamplingForm>({ orderNo: '', sampleNo: '', sampleName: '', sampleCount: '2kg × 4', sampleUnit: 'kg', sampler: '张三', samplingDate: '2026-07-04', reason: '入库初检', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-17', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', remark: '样品用于质量检验流程演示。', cargoPosition: '49仓1号货位', surveyNo: '' })
+const samplingForm = ref<SamplingForm>({ orderNo: '', sampleNo: '', sampleName: '', sampleCount: '2kg × 4', sampleUnit: 'kg', sampler: '张三', samplingDate: '2026-07-04', reason: '入库验收', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-17', packageType: '散装', retainCount: '1', inspectionCount: '1', keeper: '王保管', remark: '样品用于质量检验流程演示。', cargoPosition: '49仓1号货位', surveyNo: '' })
 const sendSampleForm = ref({ sender: '张三', sendTime: '2026-07-http://localhost:1455/auth/callback?code=ac_y1ze_eM8epyoGjXZtlBbmIutOhHwrc-YAnmGWMFPj0I.28c-z1gY4zNJXvfo3vyaJBINyJbozOkqv3A7TcA3KCc&scope=openid+email+profile+offline_access&state=5e619eceaff9ae282f092744c2da6f5f04T10:30' })
 const receiveSampleForm = ref({ receiver: '质检员A', receiveTime: '2026-07-04T11:10' })
-const reportMetaForm = ref<ReportMeta>({ category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '' })
+const reportMetaForm = ref<ReportMeta>({ category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '', qualityGrade: '一等', qualified: '是' })
 const userFormMode = ref<'create' | 'edit'>('create')
 const userForm = ref<UserForm>({ username: '', password: '123456', name: '', role: '质检员', department: '质量管理科', phone: '', status: '启用' })
 const storageKey = 'quality-management-grain-standard-state-v2'
 
 const systemUsers = ref<SystemUser[]>([
+  { username: 'fuzeren', password: '123456', name: '\u5468\u8d1f\u8d23', role: '\u8d1f\u8d23\u4eba', department: '\u8d28\u91cf\u7ba1\u7406\u79d1', phone: '13800000005', status: '\u542f\u7528' },
   { username: 'wangshuai', password: '123456', name: '王帅', role: '编制人', department: '质量管理科', phone: '13800000001', status: '启用' },
   { username: 'lishenhe', password: '123456', name: '李审核', role: '审核人', department: '质量管理科', phone: '13800000002', status: '启用' },
   { username: 'zhaopizhun', password: '123456', name: '赵批准', role: '批准人', department: '库领导', phone: '13800000003', status: '启用' },
@@ -489,10 +557,6 @@ const samplingFlowSummary = computed(() => {
   ]
 })
 
-const activeLabelStatuses = ['待检', '在检', '检毕', '留样', '销样']
-
-const editableLabelStatuses = [...activeLabelStatuses]
-
 const selectedSamplingRecord = computed(() => {
   return allSamplingRecords.value.find((item) => item.orderNo === selectedSamplingNo.value) ?? activeSamplingRecords.value[0] ?? allSamplingRecords.value[0]
 })
@@ -511,21 +575,15 @@ const labelRecords = computed(() => {
     const matchedName = !labelFilter.value.sampleName || item.sampleName.includes(labelFilter.value.sampleName)
     const matchedSource = !labelFilter.value.source || item.source === labelFilter.value.source
     const matchedNo = !labelFilter.value.sampleNo || item.sampleNo.includes(labelFilter.value.sampleNo)
-    const matchedLabelStatus = !labelFilter.value.labelStatus || (item.labelStatus ?? '待检') === labelFilter.value.labelStatus
-    return matchedStatus && matchedDeleted && matchedName && matchedSource && matchedNo && matchedLabelStatus
+    const matchedPrintStatus = !labelFilter.value.printStatus || (item.labelPrintStatus ?? '未打印') === labelFilter.value.printStatus
+    return matchedStatus && matchedDeleted && matchedName && matchedSource && matchedNo && matchedPrintStatus
   })
 })
 
+const labelPrintStatusText = (record: SamplingRecord) => record.labelPrintStatus ?? '未打印'
+
 const selectedLabelRecord = computed(() => {
   return labelRecords.value.find((item) => item.sampleNo === selectedSamplingNo.value) ?? labelRecords.value[0]
-})
-
-const labelFlowSummary = computed(() => {
-  const records = labelRecords.value
-  return activeLabelStatuses.map((status) => ({
-    label: status,
-    value: records.filter((record) => (record.labelStatus ?? '待检') === status).length,
-  }))
 })
 
 const reportRecords = computed(() => {
@@ -537,11 +595,7 @@ const filteredReportRecords = computed(() => {
   return reportRecords.value.filter((item) => {
     if (filters.sampleNo && !item.sampleNo.includes(filters.sampleNo)) return false
     if (filters.sampleName && !item.sampleName.includes(filters.sampleName)) return false
-    if (filters.labelStatus && (item.labelStatus ?? '待检') !== filters.labelStatus) return false
-    if (filters.approvalStatus) {
-      const status = reportApprovalStatusText(item)
-      if (!status.includes(filters.approvalStatus)) return false
-    }
+    if (filters.processStatus && reportProcessStatusText(item) !== filters.processStatus) return false
     return true
   })
 })
@@ -554,21 +608,23 @@ const selectedUnqualifiedRecord = computed(() => {
   return reportRecords.value.find((item) => item.sampleNo === selectedSamplingNo.value) ?? reportRecords.value[0]
 })
 
-const retainRecords = computed(() => reportRecords.value.filter((item) => item.labelStatus === '留样'))
-const destroyRecords = computed(() => reportRecords.value.filter((item) => item.labelStatus === '销样' || (item.labelStatus === '留样' && retainStatusLevel(item) === 'expired')))
-
-const retainExpireOptions = [30, 60, 90]
+const retainRecords = computed(() => [
+  ...internalRetainRecords.value,
+  ...reportRecords.value.filter((item) => item.labelStatus === '留样' && !internalRetainRecords.value.some((retain) => retain.sampleNo === item.sampleNo)),
+])
+const destroyRecords = computed(() => [
+  ...internalDestroyRecords.value,
+  ...reportRecords.value.filter((item) => (item.labelStatus === '销样' || (item.labelStatus === '留样' && retainStatusLevel(item) === 'expired')) && !internalDestroyRecords.value.some((destroy) => destroy.sampleNo === item.sampleNo)),
+  ...internalRetainRecords.value.filter((item) => retainStatusLevel(item) === 'expired' && !internalDestroyRecords.value.some((destroy) => destroy.destroySourceRetainId === (item.retainRecordId ?? item.sampleNo))),
+])
 
 const reportUnqualifiedMap: Record<string, string[]> = {
   YP20260701010: ['水分及挥发物(%)', '酸价(KOH)/(mg/g)'],
   YP20260701012: ['水分及挥发物(%)', '黄曲霉毒素B1(μg/kg)', '酸价(KOH)/(mg/g)', '铅(mg/kg)'],
   WYP20260701007: ['铅(mg/kg)'],
-  YP20260705001: ['镉 (mg/kg)', '黄粒米 (%)'],
   YP20260705002: ['水分 (g/100g)', '霉变粒率 (%)'],
-  YP20260705003: ['水分 (g/100g)', '色泽', '黄粒米 (%)'],
   YP20260706002: ['霉变粒率 (%)'],
   YP20260706004: ['热损伤粒率 (%)', '破碎粒率 (%)'],
-  YP20260713005: ['水分 (g/100g)', '杂质 (%)'],
 }
 
 const reportStandardMeta = (record: SamplingRecord, item: string) => activeQualityStandards(record).find((standard) => standard.item === item)
@@ -598,6 +654,41 @@ const reportUnqualifiedItems = (record: SamplingRecord) => reportUnqualifiedDeta
 const reportUnqualifiedCount = (record: SamplingRecord) => reportUnqualifiedItems(record).length
 const reportHasUnqualified = (record: SamplingRecord) => reportUnqualifiedCount(record) > 0
 
+const currentWarehouseSampleRecords = computed(() => {
+  const groupedRecords = new Map<string, SamplingRecord[]>()
+  reportRecords.value.forEach((record) => {
+    const cargoPosition = normalizedCargoPosition(record)
+    groupedRecords.set(cargoPosition, [...(groupedRecords.get(cargoPosition) ?? []), record])
+  })
+
+  const currentRecordsByPosition = [...groupedRecords.values()].map((records) => {
+    return [...records].sort((a, b) => {
+      const mapPriority = Number(b.warehouseMapSample) - Number(a.warehouseMapSample)
+      if (mapPriority) return mapPriority
+      const aTime = a.receiveTime ?? a.samplingDate
+      const bTime = b.receiveTime ?? b.samplingDate
+      return bTime.localeCompare(aTime)
+    })[0]
+  })
+
+  const groupedByWarehouse = new Map<string, SamplingRecord[]>()
+  currentRecordsByPosition.forEach((record) => {
+    groupedByWarehouse.set(record.warehouseNo, [...(groupedByWarehouse.get(record.warehouseNo) ?? []), record])
+  })
+
+  return [...groupedByWarehouse.values()].map((records) => {
+    return [...records].sort((a, b) => {
+      const mapPriority = Number(b.warehouseMapSample) - Number(a.warehouseMapSample)
+      if (mapPriority) return mapPriority
+      const aTime = a.receiveTime ?? a.samplingDate
+      const bTime = b.receiveTime ?? b.samplingDate
+      return bTime.localeCompare(aTime)
+    })[0]
+  })
+})
+
+const currentWarehouseSampleRecordMap = computed(() => new Map(currentWarehouseSampleRecords.value.map((record) => [record.warehouseNo, record])))
+
 const qualityRiskLevel = (record: SamplingRecord) => {
   const items = reportUnqualifiedDetails(record)
   const keyCount = items.filter((item) => item.isKey).length
@@ -608,21 +699,21 @@ const qualityRiskLevel = (record: SamplingRecord) => {
   let shortLabel = '正常'
   let status = '关键指标0项、普通指标0项，质量检验正常'
 
-  if (keyCount === 0 && normalCount > 0 && normalCount <= 2) {
+  if (keyCount >= 2 || (keyCount === 1 && normalCount >= 2)) {
     code = 'level1'
     label = '一级预警'
     shortLabel = '一级'
-    status = `普通不合格${normalCount}项，触发一级预警`
+    status = `关键不合格${keyCount}项、普通不合格${normalCount}项，触发一级预警`
   } else if ((keyCount === 0 && normalCount >= 3) || (keyCount === 1 && normalCount <= 1)) {
     code = 'level2'
     label = '二级预警'
     shortLabel = '二级'
     status = keyCount ? `关键不合格${keyCount}项、普通不合格${normalCount}项，触发二级预警` : `普通不合格${normalCount}项，触发二级预警`
-  } else if (keyCount >= 2 || (keyCount === 1 && normalCount >= 2)) {
+  } else if (keyCount === 0 && normalCount >= 1 && normalCount <= 2) {
     code = 'level3'
     label = '三级预警'
     shortLabel = '三级'
-    status = `关键不合格${keyCount}项、普通不合格${normalCount}项，触发三级预警`
+    status = `普通不合格${normalCount}项，触发三级预警`
   }
 
   return { code, label, shortLabel, status, keyCount, normalCount, total }
@@ -634,7 +725,7 @@ const openUnqualifiedItems = (sampleNo: string) => {
 }
 
 const qualityWarningRecords = computed(() => {
-  return reportRecords.value
+  return currentWarehouseSampleRecords.value
     .map((record) => {
       const items = reportUnqualifiedDetails(record)
       const risk = qualityRiskLevel(record)
@@ -651,7 +742,7 @@ const qualityWarningRecords = computed(() => {
 })
 
 const qualityWarningStats = computed(() => {
-  const rows = reportRecords.value.map((record) => qualityRiskLevel(record).code)
+  const rows = currentWarehouseSampleRecords.value.map((record) => qualityRiskLevel(record).code)
   return {
     normal: rows.filter((code) => code === 'normal').length,
     level1: rows.filter((code) => code === 'level1').length,
@@ -670,7 +761,7 @@ const level3Rate = computed(() => totalQualityRecords.value ? Math.round((qualit
 const normalRate = computed(() => Math.max(0, 100 - level1Rate.value - level2Rate.value - level3Rate.value))
 
 const warningDonutStyle = computed(() => ({
-  background: `conic-gradient(#2f80ed 0 ${normalRate.value}%, #f2c94c ${normalRate.value}% ${normalRate.value + level1Rate.value}%, #f2994a ${normalRate.value + level1Rate.value}% ${normalRate.value + level1Rate.value + level2Rate.value}%, #eb5757 ${normalRate.value + level1Rate.value + level2Rate.value}% 100%)`,
+  background: `conic-gradient(#2f80ed 0 ${normalRate.value}%, #eb5757 ${normalRate.value}% ${normalRate.value + level1Rate.value}%, #f2994a ${normalRate.value + level1Rate.value}% ${normalRate.value + level1Rate.value + level2Rate.value}%, #f2c94c ${normalRate.value + level1Rate.value + level2Rate.value}% 100%)`,
 }))
 
 const warningWarehouseCount = computed(() => new Set(qualityWarningRecords.value.map((item) => normalizedCargoPosition(item.record))).size)
@@ -714,14 +805,14 @@ const qualityReportTabs = [
   { key: 'season', label: '春秋普检测结果汇总表' },
 ]
 
-const completedReportRecords = computed(() => reportRecords.value.filter((record) => record.reportNo && record.approvalStatus !== '退回修改' && ['检毕', '留样', '销样'].includes(String(record.labelStatus))))
+const completedReportRecords = computed(() => reportRecords.value.filter((record) => record.approvalStatus === '审批通过' && Boolean(record.reportNo)))
 
 const displaySampleNo = (record: SamplingRecord) => record.sampleNo?.trim() || record.orderNo || '—'
 
-const cargoPositionOptions = [
-  { label: '49仓1号货位', warehouseNo: '49' },
-  { label: '50仓1号货位', warehouseNo: '50' },
-]
+const cargoPositionOptions = Array.from({ length: 30 }, (_, index) => {
+  const warehouseNo = String(index + 49)
+  return { label: `${warehouseNo}仓1号货位`, warehouseNo }
+})
 
 const cargoPositionByWarehouse: Record<string, string[]> = cargoPositionOptions.reduce<Record<string, string[]>>((result, item) => {
   result[item.warehouseNo] = [...(result[item.warehouseNo] ?? []), item.label]
@@ -741,17 +832,17 @@ const cargoPositionMap: Record<string, string> = {
   '50仓-2号货位': '50仓1号货位',
   '50仓-3号货位': '50仓1号货位',
   '50仓-4号货位': '50仓1号货位',
-  '51仓-1号货位': '49仓1号货位',
-  '51仓-2号货位': '49仓1号货位',
-  '51仓-3号货位': '49仓1号货位',
-  '51仓-4号货位': '49仓1号货位',
-  '52仓-1号货位': '50仓1号货位',
-  '52仓-2号货位': '50仓1号货位',
-  '52仓-3号货位': '50仓1号货位',
-  '52仓-4号货位': '50仓1号货位',
-  '53仓-1号货位': '49仓1号货位',
-  '53仓-2号货位': '49仓1号货位',
-  '53仓-3号货位': '49仓1号货位',
+  '51仓-1号货位': '51仓1号货位',
+  '51仓-2号货位': '51仓1号货位',
+  '51仓-3号货位': '51仓1号货位',
+  '51仓-4号货位': '51仓1号货位',
+  '52仓-1号货位': '52仓1号货位',
+  '52仓-2号货位': '52仓1号货位',
+  '52仓-3号货位': '52仓1号货位',
+  '52仓-4号货位': '52仓1号货位',
+  '53仓-1号货位': '53仓1号货位',
+  '53仓-2号货位': '53仓1号货位',
+  '53仓-3号货位': '53仓1号货位',
 }
 
 const cargoPositionWarehouseNo = (cargoPosition: string) => cargoPositionOptions.find((item) => item.label === cargoPosition)?.warehouseNo ?? cargoPosition.slice(0, 2)
@@ -830,8 +921,7 @@ const addDaysText = (value: string, days: number) => {
 
 const retainExpireDays = (record: SamplingRecord) => record.retainExpireDays ?? 30
 
-const retainExpireDate = (record: SamplingRecord) => addDaysText(record.retainTime ?? record.handleTime ?? ledgerHandleTime(record), retainExpireDays(record))
-const retainExpirePreviewDate = computed(() => addDaysText(retainExpireForm.value.retainTime, retainExpireForm.value.days))
+const retainExpireDate = (record: SamplingRecord) => record.retainExpireAt ?? addDaysText(record.retainTime ?? record.handleTime ?? ledgerHandleTime(record), retainExpireDays(record))
 const sampleCountWithUnit = (record: Pick<SamplingRecord, 'sampleCount' | 'sampleUnit'>) => record.sampleCount.includes(record.sampleUnit ?? '') ? record.sampleCount : `${record.sampleCount}${record.sampleUnit ?? ''}`
 const retainCountWithUnit = (record: Pick<SamplingRecord, 'retainCount' | 'sampleUnit'>) => record.retainCount ? `${record.retainCount}${record.sampleUnit ?? ''}` : '—'
 
@@ -840,6 +930,17 @@ const retainExpireDiffDays = (record: SamplingRecord) => {
   const today = parseDateText(formatDateText(new Date()))
   if (!expireDate || !today) return null
   return Math.ceil((expireDate.getTime() - today.getTime()) / 86400000)
+}
+
+const retainExpireProgress = (record: SamplingRecord) => {
+  const startDate = parseDateText(record.retainTime ?? record.receiveTime ?? record.samplingDate)
+  const expireDate = parseDateText(retainExpireDate(record))
+  const today = parseDateText(formatDateText(new Date()))
+  if (!startDate || !expireDate || !today) return 0
+  const total = expireDate.getTime() - startDate.getTime()
+  if (total <= 0) return today.getTime() >= expireDate.getTime() ? 100 : 0
+  const elapsed = today.getTime() - startDate.getTime()
+  return Math.min(100, Math.max(0, Math.round((elapsed / total) * 100)))
 }
 
 const retainStatusLevel = (record: SamplingRecord) => {
@@ -857,6 +958,37 @@ const retainStatusText = (record: SamplingRecord) => {
   return '留样'
 }
 
+const destroyRecordForRetain = (record: SamplingRecord) => internalDestroyRecords.value.find((destroy) => destroy.destroySourceRetainId === (record.retainRecordId ?? record.sampleNo) || destroy.sampleNo === record.sampleNo)
+
+const retainLifecycleStatus = (record: SamplingRecord) => {
+  if (record.retainSampleStatus === '已销样') return '已销样'
+  const destroyRecord = destroyRecordForRetain(record)
+  if (destroyRecord?.destroyApprovalStatus === '已销样') return '已销样'
+  if (destroyRecord) return '销样中'
+  return retainStatusLevel(record) === 'expired' ? '已过期' : '留样中'
+}
+
+const retainLifecycleTone = (record: SamplingRecord) => {
+  const status = retainLifecycleStatus(record)
+  if (status === '已销样') return 'destroyed'
+  if (status === '销样中') return 'disposing'
+  if (status === '已过期') return 'expired'
+  return 'normal'
+}
+
+const canStartDestroyFromRetain = (record: SamplingRecord) => {
+  const retainApproved = !record.retainRecordId || record.retainApprovalStatus === '留样完成'
+  return retainApproved && retainStatusLevel(record) === 'expired' && !destroyRecordForRetain(record) && !['销样中', '已销样'].includes(retainLifecycleStatus(record))
+}
+
+const retainWorkflowStatusText = (record: SamplingRecord) => {
+  if (!record.retainRecordId) return '历史留样'
+  if (record.retainApprovalStatus === '留样完成') return '审批流程完成'
+  if (record.retainApprovalStatus === '退回修改') return '待修改'
+  if (record.retainApprovalStep) return `${record.retainApprovalStep}审批中`
+  return record.retainSampleStatus ?? '未送审'
+}
+
 const retainExpireStatus = (record: SamplingRecord) => {
   const diffDays = retainExpireDiffDays(record)
   if (diffDays === null) return '未设置'
@@ -865,19 +997,360 @@ const retainExpireStatus = (record: SamplingRecord) => {
   return `剩余 ${diffDays} 天`
 }
 
-const openRetainExpireForm = (record: SamplingRecord) => {
-  retainExpireForm.value = { sampleNo: record.sampleNo, retainTime: (record.retainTime ?? record.handleTime ?? ledgerHandleTime(record)).slice(0, 10), days: retainExpireDays(record) }
-  showRetainExpireForm.value = true
+const openRetainScanDialog = () => {
+  retainScanValue.value = ''
+  showRetainScanDialog.value = true
 }
 
-const saveRetainExpireDays = () => {
-  const target = reportRecords.value.find((record) => record.sampleNo === retainExpireForm.value.sampleNo)
-  if (target) {
-    target.retainTime = retainExpireForm.value.retainTime
-    target.handleTime = retainExpireForm.value.retainTime
-    target.retainExpireDays = retainExpireForm.value.days
+const readRetainSampleCode = () => {
+  const target = allSamplingRecords.value.find((record) => record.sampleNo === retainScanValue.value.trim())
+    ?? labelRecords.value.find((record) => !internalRetainRecords.value.some((retain) => retain.sampleNo === record.sampleNo && retain.retainApprovalStatus !== '退回修改'))
+  if (target) retainScanValue.value = target.sampleNo
+}
+
+const fillRetainFormFromSample = (target: SamplingRecord, existing?: SamplingRecord) => {
+  retainForm.value = {
+    recordId: existing?.retainRecordId ?? '',
+    sampleNo: target.sampleNo,
+    sampleName: target.sampleName,
+    sampleDate: (target.receiveTime ?? target.samplingDate).slice(0, 10),
+    sampleCount: existing?.retainCount ?? target.retainCount ?? target.sampleCount,
+    sampleUnit: existing?.sampleUnit ?? target.sampleUnit ?? 'kg',
+    specification: existing?.retainSpecification ?? target.sampleCount,
+    warehouseNo: existing?.warehouseNo ?? target.warehouseNo,
+    cargoPosition: existing?.cargoPosition ?? target.cargoPosition ?? `${target.warehouseNo}仓1号货位`,
+    expireAt: existing?.retainExpireAt ?? '',
+    sampleStatus: existing?.retainSampleStatus ?? '待审批',
+    handlingMethod: existing?.retainHandlingMethod ?? '留存',
+    disposalTime: existing?.retainDisposalTime ?? '',
+    sourceRecordNo: target.orderNo,
+    remark: existing?.remark ?? '',
   }
-  showRetainExpireForm.value = false
+}
+
+const confirmRetainScan = () => {
+  const target = allSamplingRecords.value.find((record) => record.sampleNo === retainScanValue.value.trim())
+  if (!target) return
+  const existing = internalRetainRecords.value.find((record) => record.sampleNo === target.sampleNo)
+  if (existing && existing.retainApprovalStatus !== '退回修改') return
+  confirmAction(
+    `确认读取样品标签 ${target.sampleNo} 并进入留样登记吗？`,
+    () => {
+      fillRetainFormFromSample(target, existing)
+      showRetainScanDialog.value = false
+      showRetainForm.value = true
+    },
+    { title: '留样标签识别确认', confirmText: '进入留样登记' },
+  )
+}
+
+const openRetainEditForm = (record: SamplingRecord) => {
+  const source = allSamplingRecords.value.find((item) => item.sampleNo === record.sampleNo) ?? record
+  fillRetainFormFromSample(source, record)
+  showRetainForm.value = true
+}
+
+const addRetainApprovalHistory = (record: SamplingRecord, title: string, opinion = '') => {
+  const user = currentLoginUser.value
+  record.retainApprovalHistory = [
+    ...(record.retainApprovalHistory ?? []),
+    { title, user: user ? `${user.name}（${user.role}）` : '系统', time: currentDateTimeText(), ...(opinion.trim() ? { opinion: opinion.trim() } : {}) },
+  ]
+}
+
+const saveRetainForm = () => {
+  const form = retainForm.value
+  if (!form.sampleNo || !form.sampleName || !form.sampleDate || !form.sampleCount || !form.expireAt) return
+  const source = allSamplingRecords.value.find((record) => record.sampleNo === form.sampleNo)
+  if (!source) return
+  const existing = form.recordId ? internalRetainRecords.value.find((record) => record.retainRecordId === form.recordId) : undefined
+  const retainNo = existing?.retainRecordId ?? `LY-${form.sampleNo}-${Date.now()}`
+  const actionText = existing ? '重新提交留样登记' : '提交留样登记'
+  confirmAction(
+    `确认${actionText} ${form.sampleNo} 并进入留样审批吗？`,
+    () => {
+      const nextRecord: SamplingRecord = {
+        ...(existing ?? source),
+        orderNo: existing?.orderNo ?? retainNo,
+        status: '留样登记',
+        labelStatus: '留样',
+        approvalStatus: source.approvalStatus,
+        approvalStep: undefined,
+        reportNo: undefined,
+        retainRecordId: retainNo,
+        retainCount: form.sampleCount,
+        sampleUnit: form.sampleUnit,
+        warehouseNo: form.warehouseNo,
+        cargoPosition: form.cargoPosition,
+        packageType: form.specification,
+        retainSpecification: form.specification,
+        retainExpireAt: form.expireAt,
+        retainSampleStatus: form.sampleStatus,
+        retainHandlingMethod: form.handlingMethod,
+        retainDisposalTime: form.disposalTime,
+        retainApprovalStatus: '审批中',
+        retainApprovalStep: '审核人',
+        retainTime: existing?.retainTime ?? currentDateTimeText(),
+        handleTime: currentDateTimeText(),
+        remark: form.remark,
+        retainApprovalHistory: [
+          ...(existing?.retainApprovalHistory ?? []),
+          { title: existing ? '重新提交：留样送审' : '留样送审', user: `${currentLoginUser.value?.name ?? '质检员A'}（${currentLoginUser.value?.role ?? '质检员'}）`, time: currentDateTimeText() },
+        ],
+      }
+      if (existing) {
+        const index = internalRetainRecords.value.findIndex((record) => record.retainRecordId === retainNo)
+        if (index >= 0) internalRetainRecords.value[index] = nextRecord
+      } else {
+        internalRetainRecords.value.unshift(nextRecord)
+      }
+      showRetainForm.value = false
+    },
+    { title: '提交留样审批确认', confirmText: '确认送审' },
+  )
+}
+
+const selectedRetainRecord = computed(() => internalRetainRecords.value.find((record) => record.retainRecordId === selectedRetainRecordNo.value) ?? internalRetainRecords.value[0])
+const retainScanRecord = computed(() => allSamplingRecords.value.find((record) => record.sampleNo === retainScanValue.value.trim()))
+const retainScanExistingRecord = computed(() => internalRetainRecords.value.find((record) => record.sampleNo === retainScanValue.value.trim() && record.retainApprovalStatus !== '退回修改'))
+
+const retainApprovalFlowItems = (record?: SamplingRecord) => {
+  if (!record) return []
+  const history = record.retainApprovalHistory ?? []
+  return [
+    { name: '留样送审', state: history.some((item) => item.title.includes('留样送审')) || record.retainApprovalStep || record.retainApprovalStatus === '留样完成' ? 'done' : 'todo', icon: Send, desc: '留样登记提交审批' },
+    { name: '审核人审批', state: record.retainApprovalStep === '审核人' ? 'active' : history.some((item) => item.title.includes('审核人')) || ['负责人', '批准人'].includes(String(record.retainApprovalStep)) || record.retainApprovalStatus === '留样完成' ? 'done' : 'todo', icon: ClipboardList, desc: '留样信息审核' },
+    { name: '负责人审批', state: record.retainApprovalStep === '负责人' ? 'active' : history.some((item) => item.title.includes('负责人')) || record.retainApprovalStep === '批准人' || record.retainApprovalStatus === '留样完成' ? 'done' : 'todo', icon: Edit3, desc: '质量负责人复核' },
+    { name: '批准人审批', state: record.retainApprovalStep === '批准人' ? 'active' : history.some((item) => item.title.includes('批准人')) || record.retainApprovalStep === '确认留样' || record.retainApprovalStatus === '留样完成' ? 'done' : 'todo', icon: CheckCircle2, desc: '留样审批批准' },
+    { name: '确认留样', state: record.retainApprovalStep === '确认留样' ? 'active' : record.retainApprovalStatus === '留样完成' ? 'done' : 'todo', icon: PackageCheck, desc: '批准人最终确认留样' },
+  ]
+}
+
+const canApproveRetain = (record?: SamplingRecord) => Boolean(record?.retainApprovalStep && (record.retainApprovalStep === currentLoginUser.value?.role || (record.retainApprovalStep === '确认留样' && currentLoginUser.value?.role === '批准人')))
+
+const openRetainApprovalFlow = (record: SamplingRecord) => {
+  selectedRetainRecordNo.value = record.retainRecordId ?? ''
+  retainApprovalOpinion.value = ''
+  showRetainApprovalFlow.value = true
+}
+
+const executeRetainApproval = (record: SamplingRecord, action: 'pass' | 'return', opinion = '') => {
+  if (action === 'return') {
+    addRetainApprovalHistory(record, `${record.retainApprovalStep}：不同意，退回修改`, opinion)
+    record.retainApprovalStatus = '退回修改'
+    record.retainApprovalStep = undefined
+    record.handleTime = currentDateTimeText()
+    return
+  }
+  if (record.retainApprovalStep === '审核人') {
+    addRetainApprovalHistory(record, '审核人：审批通过/同意', opinion)
+    record.retainApprovalStep = '负责人'
+  } else if (record.retainApprovalStep === '负责人') {
+    addRetainApprovalHistory(record, '负责人：审批通过/同意', opinion)
+    record.retainApprovalStep = '批准人'
+  } else if (record.retainApprovalStep === '批准人') {
+    addRetainApprovalHistory(record, '批准人：审批通过/同意', opinion)
+    record.retainApprovalStep = '确认留样'
+  } else if (record.retainApprovalStep === '确认留样') {
+    addRetainApprovalHistory(record, '确认留样：审批流程完成', opinion)
+    record.retainApprovalStep = undefined
+    record.retainApprovalStatus = '留样完成'
+    record.retainTime = record.retainTime ?? currentDateTimeText()
+    record.handleTime = currentDateTimeText()
+  }
+}
+
+const approveRetainRecord = (action: 'pass' | 'return', record?: SamplingRecord) => {
+  const target = record ?? selectedRetainRecord.value
+  if (!target || !canApproveRetain(target)) return
+  if (record) retainApprovalOpinion.value = ''
+  if (target.retainRecordId) selectedRetainRecordNo.value = target.retainRecordId
+  const opinion = retainApprovalOpinion.value.trim()
+  confirmAction(
+    action === 'pass' ? target.retainApprovalStep === '确认留样' ? `确认样品 ${target.sampleNo} 正式进入留样并结束流程吗？` : `确认以“${target.retainApprovalStep}”身份通过留样 ${target.sampleNo} 吗？` : `确认退回留样 ${target.sampleNo} 修改吗？`,
+    () => {
+      executeRetainApproval(target, action, opinion)
+      retainApprovalOpinion.value = ''
+    },
+    { title: action === 'pass' ? target.retainApprovalStep === '确认留样' ? '最终确认留样' : '留样审批通过确认' : '留样退回修改确认', confirmText: action === 'pass' ? target.retainApprovalStep === '确认留样' ? '确认留样' : '确认通过' : '确认退回', danger: action === 'return' },
+  )
+}
+
+const destroySourceRecords = computed(() => retainRecords.value.filter((record) => {
+  const alreadyDestroyed = internalDestroyRecords.value.some((destroy) => destroy.destroySourceRetainId === (record.retainRecordId ?? record.sampleNo))
+  return retainStatusLevel(record) === 'expired' && record.retainSampleStatus !== '已销样' && !alreadyDestroyed
+}))
+
+const selectedDestroyRecord = computed(() => internalDestroyRecords.value.find((record) => record.destroyRecordId === selectedDestroyRecordNo.value) ?? internalDestroyRecords.value[0])
+
+const loadDestroySource = () => {
+  const source = destroySourceRecords.value.find((record) => (record.retainRecordId ?? record.sampleNo) === destroyForm.value.sourceRetainId)
+  if (!source) return
+  destroyForm.value = {
+    ...destroyForm.value,
+    sampleNo: source.sampleNo,
+    sampleName: source.sampleName,
+    warehouseNo: source.warehouseNo,
+    cargoPosition: source.cargoPosition ?? `${source.warehouseNo}仓1号货位`,
+    specification: source.retainSpecification ?? source.packageType ?? source.sampleCount,
+    variety: source.grainType,
+  }
+}
+
+const openDestroyForm = (record?: SamplingRecord) => {
+  destroyForm.value = { recordId: record?.destroyRecordId ?? '', sourceRetainId: record?.destroySourceRetainId ?? '', sampleNo: record?.sampleNo ?? '', sampleName: record?.sampleName ?? '', warehouseNo: record?.warehouseNo ?? '', cargoPosition: record?.cargoPosition ?? '', specification: record?.retainSpecification ?? record?.packageType ?? '', variety: record?.destroyVariety ?? record?.grainType ?? '', destroySource: record?.destroySource ?? '留样到期', remark: record?.remark ?? '' }
+  if (record) loadDestroySource()
+  showDestroyForm.value = true
+}
+
+const saveDestroyForm = () => {
+  const form = destroyForm.value
+  const source = destroySourceRecords.value.find((record) => (record.retainRecordId ?? record.sampleNo) === form.sourceRetainId)
+    ?? retainRecords.value.find((record) => (record.retainRecordId ?? record.sampleNo) === form.sourceRetainId)
+  if (!source || !form.sampleNo || !form.variety || !form.destroySource) return
+  const existing = form.recordId ? internalDestroyRecords.value.find((record) => record.destroyRecordId === form.recordId) : undefined
+  const destroyNo = existing?.destroyRecordId ?? `XX-${form.sampleNo}-${Date.now()}`
+  confirmAction(
+    `确认提交样品 ${form.sampleNo} 的销样登记并进入审批吗？`,
+    () => {
+      const nextRecord: SamplingRecord = {
+        ...(existing ?? source),
+        orderNo: existing?.orderNo ?? destroyNo,
+        status: '销样登记',
+        labelStatus: '销样',
+        reportNo: undefined,
+        destroyRecordId: destroyNo,
+        destroySourceRetainId: source.retainRecordId ?? source.sampleNo,
+        destroyApprovalStatus: '审批中',
+        destroyApprovalStep: '审核人',
+        destroyVariety: form.variety,
+        destroySource: form.destroySource,
+        retainSpecification: form.specification,
+        cargoPosition: form.cargoPosition,
+        remark: form.remark,
+        destroyApprovalHistory: [
+          ...(existing?.destroyApprovalHistory ?? []),
+          { title: existing ? '重新提交：销样送审' : '销样送审', user: `${currentLoginUser.value?.name ?? '质检员A'}（${currentLoginUser.value?.role ?? '质检员'}）`, time: currentDateTimeText() },
+        ],
+      }
+      if (existing) {
+        const index = internalDestroyRecords.value.findIndex((record) => record.destroyRecordId === destroyNo)
+        if (index >= 0) internalDestroyRecords.value[index] = nextRecord
+      } else {
+        internalDestroyRecords.value.unshift(nextRecord)
+      }
+      source.retainSampleStatus = '销样中'
+      source.retainHandlingMethod = form.destroySource
+      source.handleTime = currentDateTimeText()
+      showDestroyForm.value = false
+    },
+    { title: '提交销样审批确认', confirmText: '确认送审' },
+  )
+}
+
+const startDestroyFromRetain = (record: SamplingRecord) => {
+  if (!canStartDestroyFromRetain(record)) return
+  const destroyNo = `XX-${record.sampleNo}-${Date.now()}`
+  const sourceId = record.retainRecordId ?? record.sampleNo
+  const sourceText = retainStatusLevel(record) === 'expired' ? '留样到期' : '主动销样'
+  confirmAction(
+    `确认将留样 ${record.sampleNo} 转入销样审批流程吗？`,
+    () => {
+      internalDestroyRecords.value.unshift({
+        ...record,
+        orderNo: destroyNo,
+        status: '销样登记',
+        labelStatus: '销样',
+        reportNo: undefined,
+        destroyRecordId: destroyNo,
+        destroySourceRetainId: sourceId,
+        destroyApprovalStatus: '审批中',
+        destroyApprovalStep: '审核人',
+        destroyVariety: record.grainType,
+        destroySource: sourceText,
+        destroyApprovalHistory: [{ title: '销样送审', user: `${currentLoginUser.value?.name ?? '质检员A'}（${currentLoginUser.value?.role ?? '质检员'}）`, time: currentDateTimeText() }],
+      })
+      record.retainSampleStatus = '销样中'
+      record.retainHandlingMethod = sourceText
+      record.handleTime = currentDateTimeText()
+    },
+    { title: '转入销样审批确认', confirmText: '确认销样送审', danger: true },
+  )
+}
+
+const destroyApprovalFlowItems = (record?: SamplingRecord) => {
+  if (!record) return []
+  const history = record.destroyApprovalHistory ?? []
+  return [
+    { name: '销样送审', state: history.some((item) => item.title.includes('销样送审')) || record.destroyApprovalStep || record.destroyApprovalStatus === '已销样' ? 'done' : 'todo', icon: Send, desc: '销样登记提交审批' },
+    { name: '审核人审批', state: record.destroyApprovalStep === '审核人' ? 'active' : history.some((item) => item.title.includes('审核人')) || ['负责人', '批准人'].includes(String(record.destroyApprovalStep)) || record.destroyApprovalStatus === '已销样' ? 'done' : 'todo', icon: ClipboardList, desc: '销样信息审核' },
+    { name: '负责人审批', state: record.destroyApprovalStep === '负责人' ? 'active' : history.some((item) => item.title.includes('负责人')) || record.destroyApprovalStep === '批准人' || record.destroyApprovalStep === '确认销样' || record.destroyApprovalStatus === '已销样' ? 'done' : 'todo', icon: Edit3, desc: '质量负责人复核' },
+    { name: '批准人审批', state: record.destroyApprovalStep === '批准人' ? 'active' : history.some((item) => item.title.includes('批准人')) || record.destroyApprovalStep === '确认销样' || record.destroyApprovalStatus === '已销样' ? 'done' : 'todo', icon: CheckCircle2, desc: '销样审批批准' },
+    { name: '确认销样', state: record.destroyApprovalStep === '确认销样' ? 'active' : record.destroyApprovalStatus === '已销样' ? 'done' : 'todo', icon: Trash2, desc: '批准人最终确认销样' },
+  ]
+}
+
+const canApproveDestroy = (record?: SamplingRecord) => Boolean(record?.destroyApprovalStep && (record.destroyApprovalStep === currentLoginUser.value?.role || (record.destroyApprovalStep === '确认销样' && currentLoginUser.value?.role === '批准人')))
+
+const openDestroyApprovalFlow = (record: SamplingRecord) => {
+  selectedDestroyRecordNo.value = record.destroyRecordId ?? ''
+  destroyApprovalOpinion.value = ''
+  showDestroyApprovalFlow.value = true
+}
+
+const executeDestroyApproval = (record: SamplingRecord, action: 'pass' | 'return', opinion = '') => {
+  if (action === 'return') {
+    addDestroyApprovalHistory(record, `${record.destroyApprovalStep}：不同意，退回修改`, opinion)
+    record.destroyApprovalStatus = '退回修改'
+    record.destroyApprovalStep = undefined
+    return
+  }
+  if (record.destroyApprovalStep === '审核人') {
+    addDestroyApprovalHistory(record, '审核人：审批通过/同意', opinion)
+    record.destroyApprovalStep = '负责人'
+  } else if (record.destroyApprovalStep === '负责人') {
+    addDestroyApprovalHistory(record, '负责人：审批通过/同意', opinion)
+    record.destroyApprovalStep = '批准人'
+  } else if (record.destroyApprovalStep === '批准人') {
+    addDestroyApprovalHistory(record, '批准人：审批通过/同意', opinion)
+    record.destroyApprovalStep = '确认销样'
+  } else if (record.destroyApprovalStep === '确认销样') {
+    addDestroyApprovalHistory(record, '确认销样：销样流程完成', opinion)
+    record.destroyApprovalStep = undefined
+    record.destroyApprovalStatus = '已销样'
+    record.destroyTime = currentDateTimeText()
+    record.handleTime = record.destroyTime
+    const source = internalRetainRecords.value.find((retain) => retain.retainRecordId === record.destroySourceRetainId || retain.sampleNo === record.sampleNo)
+      ?? allSamplingRecords.value.find((retain) => retain.retainRecordId === record.destroySourceRetainId || retain.sampleNo === record.sampleNo)
+    if (source) {
+      source.retainSampleStatus = '已销样'
+      source.retainDisposalTime = record.destroyTime
+    }
+  }
+}
+
+const addDestroyApprovalHistory = (record: SamplingRecord, title: string, opinion = '') => {
+  const user = currentLoginUser.value
+  record.destroyApprovalHistory = [
+    ...(record.destroyApprovalHistory ?? []),
+    { title, user: user ? `${user.name}（${user.role}）` : '系统', time: currentDateTimeText(), ...(opinion.trim() ? { opinion: opinion.trim() } : {}) },
+  ]
+}
+
+const approveDestroyRecord = (action: 'pass' | 'return', record?: SamplingRecord) => {
+  const target = record ?? selectedDestroyRecord.value
+  if (!target || !canApproveDestroy(target)) return
+  if (record) destroyApprovalOpinion.value = ''
+  if (target.destroyRecordId) selectedDestroyRecordNo.value = target.destroyRecordId
+  const opinion = destroyApprovalOpinion.value.trim()
+  confirmAction(
+    action === 'pass' ? target.destroyApprovalStep === '确认销样' ? `确认样品 ${target.sampleNo} 正式销样并结束流程吗？` : `确认以“${target.destroyApprovalStep}”身份通过样品 ${target.sampleNo} 的销样申请吗？` : `确认退回样品 ${target.sampleNo} 的销样申请修改吗？`,
+    () => {
+      executeDestroyApproval(target, action, opinion)
+      destroyApprovalOpinion.value = ''
+    },
+    { title: action === 'pass' ? target.destroyApprovalStep === '确认销样' ? '最终确认销样' : '销样审批通过确认' : '销样退回修改确认', confirmText: action === 'pass' ? target.destroyApprovalStep === '确认销样' ? '确认销样' : '确认通过' : '确认退回', danger: action === 'return' },
+  )
 }
 
 const reportConclusion = (record: SamplingRecord) => {
@@ -886,18 +1359,35 @@ const reportConclusion = (record: SamplingRecord) => {
   return risk.label
 }
 
+const qualityGradeText = (record: SamplingRecord) => {
+  if (record.reportMeta?.qualityGrade) return record.reportMeta.qualityGrade
+  return reportHasUnqualified(record) ? '不合格' : '一等'
+}
+
+const qualifiedText = (record: SamplingRecord): '是' | '否' => {
+  if (record.reportMeta?.qualified === '是' || record.reportMeta?.qualified === '否') return record.reportMeta.qualified
+  return reportHasUnqualified(record) ? '否' : '是'
+}
+
+const qualityGradeTone = (record: SamplingRecord) => {
+  const grade = qualityGradeText(record)
+  if (qualifiedText(record) === '否' || grade.includes('不合格')) return 'fail'
+  if (grade.includes('三等') || grade.includes('等外')) return 'warning'
+  return 'pass'
+}
+
 const reportQualityGrade = (record: SamplingRecord) => {
   const risk = qualityRiskLevel(record)
-  if (risk.code === 'level3') return '不合格'
-  if (risk.code === 'level2') return '重点复核'
-  if (risk.code === 'level1') return '待复核'
-  return '一等'
+  if (risk.code === 'level1') return '不合格（一级预警）'
+  if (risk.code === 'level2') return '重点复核（二级预警）'
+  if (risk.code === 'level3') return '待复核（三级预警）'
+  return '一等（质量正常）'
 }
 
 const reportConclusionTone = (record: SamplingRecord) => {
   const code = qualityRiskLevel(record).code
   if (code === 'normal') return 'ok'
-  if (code === 'level3') return 'alarm'
+  if (code === 'level1') return 'alarm'
   return 'warning'
 }
 
@@ -920,7 +1410,7 @@ const cargoDetailRows = computed(() => completedReportRecords.value.map((record)
   ...record,
   position: normalizedCargoPosition(record),
   warehouseNo: cargoPositionWarehouseNo(normalizedCargoPosition(record)),
-  stock: warehouseMarkers.find((item) => item.code === `${cargoPositionWarehouseNo(normalizedCargoPosition(record))}仓`)?.stockQuantity ?? '—',
+  stock: warehouseMarkers.value.find((item) => item.code === `${cargoPositionWarehouseNo(normalizedCargoPosition(record))}仓`)?.stockQuantity ?? '—',
   conclusion: reportConclusion(record),
   grade: reportQualityGrade(record),
   unqualified: reportUnqualifiedItems(record),
@@ -1005,8 +1495,8 @@ const warehouseReportMeta = computed(() => {
   const rows = warehouseReportRows.value
   const uniq = (values: string[]) => [...new Set(values.filter(Boolean))]
   const totalQuantity = rows.reduce((total, row) => total + (Number(row.quantity) || 0), 0)
-  const hasAlarm = rows.some((row) => qualityRiskLevel(row.record).code === 'level3')
-  const hasWarning = rows.some((row) => ['level1', 'level2'].includes(qualityRiskLevel(row.record).code))
+  const hasAlarm = rows.some((row) => qualityRiskLevel(row.record).code === 'level1')
+  const hasWarning = rows.some((row) => ['level2', 'level3'].includes(qualityRiskLevel(row.record).code))
   return {
     enterprise: '中央储备粮镇江直属库有限公司',
     nature: 'GYC',
@@ -1031,8 +1521,8 @@ const warehouseSummaryRows = computed(() => {
   const positions = cargoPositionOptions.map((item) => item.label)
   return positions.map((position) => {
   const records = completedReportRecords.value.filter((record) => normalizedCargoPosition(record) === position)
-  const warningCount = records.filter((record) => ['level1', 'level2'].includes(qualityRiskLevel(record).code)).length
-  const alarmCount = records.filter((record) => qualityRiskLevel(record).code === 'level3').length
+  const warningCount = records.filter((record) => ['level2', 'level3'].includes(qualityRiskLevel(record).code)).length
+  const alarmCount = records.filter((record) => qualityRiskLevel(record).code === 'level1').length
   const passCount = records.filter((record) => qualityRiskLevel(record).code === 'normal').length
   return {
     warehouseNo: cargoPositionWarehouseNo(position),
@@ -1898,6 +2388,99 @@ const updateReportResult = (item: string, field: keyof ReportResult, value: stri
   }
 }
 
+const instrumentIndicatorKeywords = (instrument: LabInstrument) => {
+  if (instrument.name.includes('容重')) return ['容重']
+  if (instrument.name.includes('水分') || instrument.name.includes('测水')) return ['水分']
+  if (instrument.name.includes('杂质')) return ['杂质']
+  if (instrument.name.includes('脂肪酸')) return ['脂肪酸值', '粗脂肪酸值', '酸价']
+  if (instrument.name.includes('硬度')) return ['硬度']
+  return []
+}
+
+const instrumentSupportedStandards = (instrument: LabInstrument) => {
+  const keywords = instrumentIndicatorKeywords(instrument)
+  return activeQualityStandards(selectedReportRecord.value).filter((standard) => keywords.some((keyword) => standard.item.includes(keyword)))
+}
+
+const instrumentAutoEntryRows = computed(() => labInstruments.value.map((instrument) => {
+  const standards = instrumentSupportedStandards(instrument)
+  return {
+    instrument,
+    standards,
+    selectable: instrument.status !== '弃用' && standards.length > 0,
+  }
+}))
+
+const selectedInstrumentItemCount = computed(() => new Set(instrumentAutoEntryRows.value
+  .filter((row) => selectedInstrumentCodes.value.includes(row.instrument.code))
+  .flatMap((row) => row.standards.map((standard) => standard.item))).size)
+
+const buildInstrumentReading = (standard: QualityStandard, instrument: LabInstrument) => {
+  if (standard.standard === '正常') return '正常'
+  const standardValue = parseStandardNumber(standard.standard)
+  if (Number.isNaN(standardValue)) return standard.standard
+  const decimalCount = standard.standard.match(/\.(\d+)/)?.[1].length ?? 0
+  const codeSeed = [...instrument.code].reduce((total, char) => total + char.charCodeAt(0), 0)
+  const offset = (codeSeed % 7) / 100
+  const value = standard.standard.includes('≥') || standard.standard.includes('>')
+    ? standardValue * (1.06 + offset)
+    : standardValue * (0.78 + offset)
+  return value.toFixed(Math.min(Math.max(decimalCount, 1), 3))
+}
+
+const openInstrumentDataDialog = () => {
+  selectedInstrumentCodes.value = []
+  showInstrumentDataDialog.value = true
+}
+
+const applyInstrumentDetectionDataNow = () => {
+  const target = selectedReportRecord.value
+  const selectedRows = instrumentAutoEntryRows.value.filter((row) => selectedInstrumentCodes.value.includes(row.instrument.code) && row.selectable)
+  if (!target || !selectedRows.length || !selectedInstrumentItemCount.value) return
+
+  const groupedReadings = new Map<string, { standard: QualityStandard; readings: { value: string; instrument: LabInstrument }[] }>()
+  selectedRows.forEach((row) => {
+    row.standards.forEach((standard) => {
+      const group = groupedReadings.get(standard.item) ?? { standard, readings: [] }
+      group.readings.push({ value: buildInstrumentReading(standard, row.instrument), instrument: row.instrument })
+      groupedReadings.set(standard.item, group)
+    })
+  })
+
+  const capturedAt = currentDateTimeText()
+  const nextResults = { ...(target.reportResults ?? buildDefaultReportResults(target)) }
+  groupedReadings.forEach(({ standard, readings }, item) => {
+    const numericValues = readings.map((reading) => Number(reading.value)).filter((value) => Number.isFinite(value))
+    const detectValue = numericValues.length === readings.length
+      ? (numericValues.reduce((total, value) => total + value, 0) / numericValues.length).toFixed(readings[0].value.split('.')[1]?.length ?? 0)
+      : readings[0].value
+    nextResults[item] = {
+      ...(nextResults[item] ?? { inspector: currentLoginUser.value?.name ?? '质检员A' }),
+      detectValue,
+      judgement: judgeByStandard(standard.standard, detectValue),
+      inspector: currentLoginUser.value?.name ?? '质检员A',
+      standard: standard.standard,
+      type: standard.type,
+      isKey: standard.isKey,
+      instrumentCode: readings.map((reading) => reading.instrument.code).join('、'),
+      instrumentName: readings.map((reading) => reading.instrument.name).join('、'),
+      capturedAt,
+    }
+  })
+  target.reportResults = nextResults
+  showInstrumentDataDialog.value = false
+}
+
+const applyInstrumentDetectionData = () => {
+  const selectedRows = instrumentAutoEntryRows.value.filter((row) => selectedInstrumentCodes.value.includes(row.instrument.code) && row.selectable)
+  if (!selectedRows.length || !selectedInstrumentItemCount.value) return
+  confirmAction(
+    `确认从 ${selectedRows.length} 台检化验设备获取 ${selectedInstrumentItemCount.value} 项检测数据并自动填充吗？`,
+    applyInstrumentDetectionDataNow,
+    { title: '设备数据获取确认', confirmText: '获取并填充' },
+  )
+}
+
 const ledgerRecords = computed(() => {
   return reportRecords.value.filter((item) => {
     const receiveDate = String(item.receiveTime ?? '').slice(0, 10)
@@ -1938,29 +2521,6 @@ const ledgerHandleTime = (record: SamplingRecord) => {
 
 const qualityStandards: Record<string, Record<string, QualityStandard[]>> = {
   玉米: {
-    入库初检: [
-      { item: '镉 (mg/kg)', standard: '≤0.10', isKey: false, type: '卫生指标' },
-      { item: '黄粒米 (%)', standard: '≤1.00', isKey: false, type: '质量等级' },
-      { item: '水分 (g/100g)', standard: '≤14.00', isKey: true, type: '质量等级' },
-      { item: '黄曲霉毒素B1 (μg/kg)', standard: '≤5.00', isKey: false, type: '质量等级' },
-      { item: '色泽', standard: '正常', isKey: true, type: '质量等级' },
-      { item: '气味', standard: '正常', isKey: true, type: '质量等级' },
-      { item: '脂肪酸值 (mgKOH/100g)', standard: '≤50.00', isKey: false, type: '储存品质' },
-      { item: '杂质 (%)', standard: '≤1.00', isKey: true, type: '质量等级' },
-      { item: '铅 (mg/kg)', standard: '≤0.20', isKey: false, type: '卫生指标' },
-      { item: '容重 (g/L)', standard: '≥720.00', isKey: false, type: '质量等级' },
-      { item: '无机砷 (mg/kg)', standard: '≤0.20', isKey: false, type: '卫生指标' },
-      { item: '三唑磷 (mg/kg)', standard: '≤0.05', isKey: false, type: '卫生指标' },
-      { item: '毒死蜱 (mg/kg)', standard: '≤0.05', isKey: false, type: '卫生指标' },
-      { item: '马拉硫磷 (mg/kg)', standard: '≤8', isKey: false, type: '卫生指标' },
-      { item: '水胺硫磷 (mg/kg)', standard: '≤0.05', isKey: false, type: '卫生指标' },
-      { item: '谷外糙米 (%)', standard: '≤2.0', isKey: false, type: '质量等级' },
-      { item: '赭曲霉毒素A (μg/kg)', standard: '≤5.00', isKey: false, type: '卫生指标' },
-      { item: '磷化物 (mg/kg)', standard: '≤0.05', isKey: false, type: '卫生指标' },
-      { item: '品尝评分值 (分)', standard: '≥70.00', isKey: false, type: '储存品质' },
-      { item: '不完善粒总量 (%)', standard: '≤4.00', isKey: true, type: '质量等级' },
-      { item: '汞 (mg/kg)', standard: '≤0.02', isKey: false, type: '卫生指标' },
-    ],
     入库验收: [
       { item: '镉 (mg/kg)', standard: '≤0.10', isKey: false, type: '卫生指标' },
       { item: '黄粒米 (%)', standard: '≤1.00', isKey: false, type: '质量等级' },
@@ -2003,22 +2563,6 @@ const qualityStandards: Record<string, Record<string, QualityStandard[]>> = {
     ],
   },
   大豆: {
-    入库初检: [
-      { item: '色泽', standard: '正常', isKey: true, type: '质量等级' },
-      { item: '气味', standard: '正常', isKey: true, type: '质量等级' },
-      { item: '水分 (g/100g)', standard: '≤13.50', isKey: false, type: '质量等级' },
-      { item: '杂质 (%)', standard: '≤1.00', isKey: false, type: '质量等级' },
-      { item: '完整粒率 (%)', standard: '≥75.00', isKey: false, type: '质量等级' },
-      { item: '损伤粒率 (%)', standard: '≤8.00', isKey: true, type: '质量等级' },
-      { item: '热损伤粒率 (%)', standard: '≤1.00', isKey: false, type: '质量等级' },
-      { item: '破碎粒率 (%)', standard: '≤20.00', isKey: false, type: '质量等级，储存品质' },
-      { item: '霉变粒率 (%)', standard: '≤1.00', isKey: false, type: '质量等级，储存品质' },
-      { item: '粗脂肪酸值 (mg/g)', standard: '≤3.50', isKey: false, type: '储存品质' },
-      { item: '蛋白质含量 (g/100g)', standard: '≥33.00', isKey: false, type: '质量等级，储存品质' },
-      { item: '脂肪含量 (g/100g)', standard: '≥18.00', isKey: false, type: '质量等级' },
-      { item: '黄粒米 (%)', standard: '≤1.00', isKey: false, type: '质量等级' },
-      { item: '赭曲霉毒素A (μg/kg)', standard: '≤5.00', isKey: false, type: '卫生指标' },
-    ],
     入库验收: [
       { item: '水分 (g/100g)', standard: '≤13.50', isKey: true, type: '质量等级' },
       { item: '色泽', standard: '正常', isKey: true, type: '质量等级' },
@@ -2053,37 +2597,109 @@ const qualityStandards: Record<string, Record<string, QualityStandard[]>> = {
 }
 
 const grainOptions = Object.keys(qualityStandards)
-const inspectionReasons = ['入库初检', '入库验收', '出库检测', '春季普检', '秋季普检']
+const inspectionReasons = ['入库验收', '出库检测', '春季普检', '秋季普检']
 const internalReasons = inspectionReasons
 const externalReasons = inspectionReasons
+const isSupportedInspectionRecord = (record: Pick<SamplingRecord, 'reason'>) => inspectionReasons.includes(record.reason)
 const warehouseOptions = ['49', '50']
 const qualityStandardReason = (reason: string) => reason.includes('春季') || reason.includes('秋季') ? '出库检测' : reason
 const activeQualityStandards = (record: Pick<SamplingRecord, 'grainType' | 'reason'>) => qualityStandards[record.grainType]?.[qualityStandardReason(record.reason)] ?? []
 const qualityLevelItems = computed(() => activeQualityStandards(selectedReportRecord.value).filter((item) => item.type.includes('质量等级') && !item.type.includes('储存品质')))
 const storageQualityItems = computed(() => activeQualityStandards(selectedReportRecord.value).filter((item) => item.type.includes('储存品质')))
 const healthIndicatorItems = computed(() => activeQualityStandards(selectedReportRecord.value).filter((item) => item.type.includes('卫生指标')))
-const flowNodes = computed(() => [
-  { name: '扦样单', count: allSamplingRecords.value.length, status: 'active', icon: ClipboardPenLine, tab: 'sampling', action: 'sampling' },
-  { name: '样品标签', count: labelRecords.value.length, status: 'done', icon: Printer, tab: 'label', action: 'label' },
-  { name: '检验报告', count: completedReportRecords.value.length, status: 'active', icon: ClipboardList, tab: 'report', action: 'report' },
-  { name: '在线审批', count: reportRecords.value.filter((item) => item.approvalStep).length, status: 'warning', icon: CheckCircle2, tab: 'report', action: 'approval' },
-  { name: '样品台账', count: ledgerRecords.value.length, status: 'done', icon: BookOpenText, tab: 'ledger', action: 'ledger' },
-  { name: '留样管理', count: retainRecords.value.length, status: 'normal', icon: PackageCheck, tab: 'retain', action: 'retain' },
-  { name: '销样管理', count: destroyRecords.value.length, status: 'normal', icon: Trash2, tab: 'destroy', action: 'destroy' },
+const inspectionKpis = computed(() => [
+  { label: '扦样单', value: allSamplingRecords.value.length, tab: 'sampling', icon: ClipboardPenLine },
+  { label: '样品标签', value: labelRecords.value.length, tab: 'label', icon: Printer },
+  { label: '检验报告', value: completedReportRecords.value.length, tab: 'report', icon: ClipboardList },
+  { label: '样品台账', value: ledgerRecords.value.length, tab: 'ledger', icon: BookOpenText },
+  { label: '样品留样', value: retainRecords.value.length, tab: 'retain', icon: PackageCheck },
+  { label: '销样', value: destroyRecords.value.length, tab: 'destroy', icon: Trash2 },
 ])
 
-const openInspectionFlowNode = (tab: string) => {
+const upcomingBusinessItems = computed(() => {
+  const records = allSamplingRecords.value
+  const items = [
+    { key: 'sampling', title: '扦样单核对', description: '优先核对新近扦样的样品信息', records: records.filter((record) => record.status === '扦样完成' || record.status === '已送样'), icon: ClipboardPenLine, tone: 'blue', action: '查看扦样单' },
+    { key: 'label', title: '样品标签', description: '已收样样品等待标签确认或打印', records: labelRecords.value, icon: Printer, tone: 'teal', action: '查看标签' },
+    { key: 'report', title: '检验报告', description: '已完成检验的样品可查看报告', records: completedReportRecords.value, icon: ClipboardList, tone: 'violet', action: '查看报告' },
+    { key: 'approval', title: '待审批报告', description: '已提交报告等待审批流程处理', records: reportRecords.value.filter((record) => record.labelStatus === '检毕' && Boolean(record.approvalStep)), icon: CheckCircle2, tone: 'orange', action: '查看审批' },
+    { key: 'retain', title: '留样管理', description: '已批准样品需核对留样与到期信息', records: retainRecords.value, icon: PackageCheck, tone: 'green', action: '查看留样' },
+    { key: 'destroy', title: '销样处置', description: '到期或异常样品等待销样处置', records: destroyRecords.value, icon: Trash2, tone: 'red', action: '查看销样' },
+  ]
+  const total = items.reduce((sum, item) => sum + item.records.length, 0)
+  return items.map((item) => ({ ...item, count: item.records.length, percent: total ? Math.round((item.records.length / total) * 100) : 0, record: item.records[0] }))
+})
+
+const upcomingBusinessTotal = computed(() => upcomingBusinessItems.value.reduce((sum, item) => sum + item.count, 0))
+const upcomingBusinessChartSegments = computed(() => {
+  let offset = 0
+  return upcomingBusinessItems.value.filter((item) => item.count > 0).map((item) => {
+    const segment = { ...item, offset }
+    offset += item.percent
+    return segment
+  })
+})
+
+const inspectionTodoRows = computed(() => {
+  const category = inspectionTodoDialog.value
+  if (category === 'send') return allSamplingRecords.value.filter((record) => record.status === '扦样完成')
+  if (category === 'receive') return allSamplingRecords.value.filter((record) => record.status === '已送样')
+  if (category === 'inspect') return reportRecords.value.filter((record) => (record.labelStatus ?? '待检') === '待检')
+  if (category === 'result') return reportRecords.value.filter((record) => record.labelStatus === '在检' && !record.approvalStep)
+  if (category === 'approval') return reportRecords.value.filter((record) => record.labelStatus === '检毕' && Boolean(record.approvalStep))
+  if (category === 'destroy') return destroyRecords.value
+  return []
+})
+
+const inspectionTodoMeta = computed(() => {
+  const category = inspectionTodoDialog.value
+  const meta = {
+    send: { title: '待送样业务', description: '扦样完成后，等待送交检化验室的样品' },
+    receive: { title: '待收样业务', description: '已送样后，等待检化验室接收的样品' },
+    inspect: { title: '待检业务', description: '已收样、等待扫码录入的样品' },
+    result: { title: '待录入结果业务', description: '检测进行中、等待录入检验结果的样品' },
+    approval: { title: '待审批业务', description: '质检结果已提交、等待审批流处理的样品' },
+    destroy: { title: '待销样业务', description: '已转入销样管理或留样到期的样品' },
+  }
+  return category ? meta[category] : { title: '', description: '' }
+})
+
+const inspectionTodoItems = computed(() => {
+  const records = allSamplingRecords.value
+  const rows = [
+    { key: 'send' as const, label: '待送样', count: records.filter((record) => record.status === '扦样完成').length, icon: Send, tone: 'blue' },
+    { key: 'receive' as const, label: '待收样', count: records.filter((record) => record.status === '已送样').length, icon: PackageCheck, tone: 'teal' },
+    { key: 'inspect' as const, label: '待检', count: reportRecords.value.filter((record) => (record.labelStatus ?? '待检') === '待检').length, icon: Microscope, tone: 'violet' },
+    { key: 'result' as const, label: '待录入结果', count: reportRecords.value.filter((record) => record.labelStatus === '在检' && !record.approvalStep).length, icon: ClipboardPenLine, tone: 'amber' },
+    { key: 'approval' as const, label: '待审批', count: reportRecords.value.filter((record) => record.labelStatus === '检毕' && Boolean(record.approvalStep)).length, icon: CheckCircle2, tone: 'orange' },
+    { key: 'destroy' as const, label: '待销样', count: destroyRecords.value.length, icon: Trash2, tone: 'red' },
+  ]
+  const total = rows.reduce((sum, item) => sum + item.count, 0)
+  const max = Math.max(...rows.map((item) => item.count), 1)
+  return rows.map((item) => ({ ...item, percent: total ? Math.round((item.count / total) * 100) : 0, progress: Math.round((item.count / max) * 100) }))
+})
+
+const inspectionTodoTotal = computed(() => inspectionTodoItems.value.reduce((sum, item) => sum + item.count, 0))
+
+const openInspectionTab = (tab: string) => {
   activeMenu.value = 'inspection'
   inspectionTab.value = tab
 }
 
-const inspectionKpis = computed(() => [
-  { label: '今日扦样', value: allSamplingRecords.value.filter((item) => item.samplingDate === '2026-07-04').length },
-  { label: '待检样品', value: reportRecords.value.filter((item) => (item.labelStatus ?? '待检') === '待检').length },
-  { label: '待审报告', value: currentApprovalTodoRecords.value.length },
-  { label: '留样数量', value: retainRecords.value.length },
-  { label: '销样', value: destroyRecords.value.length },
-])
+const openUpcomingBusiness = (item: { key: string; record?: SamplingRecord }) => {
+  const record = item.record
+  if (!record) return
+  if (item.key === 'sampling') return openSamplingDetail(record.orderNo)
+  if (item.key === 'label') return openSampleLabelPrint(record.sampleNo)
+  if (item.key === 'report') return openReportView(record.sampleNo)
+  if (item.key === 'approval') return openApprovalFlow(record.sampleNo)
+  upcomingBusinessRecord.value = record
+  upcomingBusinessDialog.value = item.key === 'retain' ? 'retain' : 'destroy'
+}
+
+const openInspectionTodo = (category: InspectionTodoCategory) => {
+  inspectionTodoDialog.value = category
+}
 
 const sampleStatusRows = computed(() => ['录入中', '扦样完成', '已送样', '待检', '在检', '检毕', '留样', '销样'].map((status) => {
   const count = allSamplingRecords.value.filter((item) => item.status === status || (item.status === '已收样' && (item.labelStatus ?? '待检') === status)).length
@@ -2110,6 +2726,26 @@ const buildDefaultReportResults = (record: SamplingRecord) => {
     }
     return result
   }, {})
+}
+
+const buildWarehouseMapReportResults = (grainType: string, reason: string, keyFailures: number, normalFailures: number) => {
+  const record = { grainType, reason } as SamplingRecord
+  const results = buildDefaultReportResults(record)
+  const standards = activeQualityStandards(record)
+  const failedStandards = [
+    ...standards.filter((item) => item.isKey).slice(0, keyFailures),
+    ...standards.filter((item) => !item.isKey).slice(0, normalFailures),
+  ]
+
+  failedStandards.forEach((standard) => {
+    results[standard.item] = {
+      ...results[standard.item],
+      detectValue: `${standard.standard}，超出标准值`,
+      judgement: '不合格',
+    }
+  })
+
+  return results
 }
 
 const createCompleteSoybeanInboundReportResults = (): Record<string, ReportResult> => ({
@@ -2174,9 +2810,7 @@ const inspectionTabs = [
 ]
 
 const qualityWarningTestRecords: SamplingRecord[] = [
-  { orderNo: 'QY20260705001', sampleNo: 'YP20260705001', sampleName: '49仓玉米一级预警测试样品', sampleCount: '2kg × 4', sampler: '张三', samplingDate: '2026-07-05', source: '内部扦样', status: '已收样', labelStatus: '检毕', sampleUnit: 'kg', approvalStatus: '审批中', approvalStep: '编制人', reason: '入库初检', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-18', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '49仓1号货位', sender: '张三', sendTime: '2026-07-05 09:00', receiver: '质检员A', receiveTime: '2026-07-05 09:30', reportNo: 'ZJBG-NB-20260705001', reportMeta: { category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '一级预警测试数据：普通不合格2项。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-05 10:10' }], reportResults: buildDefaultReportResults({ sampleNo: 'YP20260705001', grainType: '玉米', reason: '入库初检' } as SamplingRecord) },
   { orderNo: 'QY20260705002', sampleNo: 'YP20260705002', sampleName: '50仓大豆二级预警测试样品', sampleCount: '2kg × 4', sampler: '李四', samplingDate: '2026-07-05', source: '内部扦样', status: '已收样', labelStatus: '检毕', sampleUnit: 'kg', approvalStatus: '审批中', approvalStep: '审核人', reason: '入库验收', grainType: '大豆', warehouseNo: '50', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '黑龙江', productionYear: '2026', storageDate: '2026-06-20', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '50仓1号货位', sender: '李四', sendTime: '2026-07-05 10:00', receiver: '质检员A', receiveTime: '2026-07-05 10:30', reportNo: 'ZJBG-NB-20260705002', reportMeta: { category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '二级预警测试数据：关键不合格1项、普通不合格1项。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-05 11:10' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-05 11:30' }], reportResults: createCompleteSoybeanInboundReportResults() },
-  { orderNo: 'QY20260705003', sampleNo: 'YP20260705003', sampleName: '49仓玉米三级预警测试样品', sampleCount: '2kg × 4', sampler: '王五', samplingDate: '2026-07-05', source: '内部扦样', status: '已收样', labelStatus: '检毕', sampleUnit: 'kg', approvalStatus: '审批中', approvalStep: '批准人', reason: '入库初检', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-22', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '49仓1号货位', sender: '王五', sendTime: '2026-07-05 11:00', receiver: '质检员A', receiveTime: '2026-07-05 11:30', reportNo: 'ZJBG-NB-20260705003', reportMeta: { category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '三级预警测试数据：关键不合格2项、普通不合格1项。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-05 12:10' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-05 12:30' }, { title: '审核人：审批通过/同意', user: '李审核（审核人）', time: '2026-07-05 13:00' }], reportResults: buildDefaultReportResults({ sampleNo: 'YP20260705003', grainType: '玉米', reason: '入库初检' } as SamplingRecord) },
   { orderNo: 'QY20260706001', sampleNo: 'YP20260706001', sampleName: '49仓玉米春季普检样品', sampleCount: '2kg × 4', sampler: '张三', samplingDate: '2026-07-06', source: '内部扦样', status: '已收样', labelStatus: '检毕', sampleUnit: 'kg', approvalStatus: '审批通过', reason: '春季普检', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-18', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '49仓1号货位', surveyNo: 'CJP-20260706-49', sender: '张三', sendTime: '2026-07-06 09:00', receiver: '质检员A', receiveTime: '2026-07-06 09:30', reportNo: 'ZJBG-NB-20260706001', reportMeta: { category: '春季普检', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '春季普检测试数据，检测指标采用出库检测标准。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-06 10:10' }, { title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-06 11:00' }], reportResults: buildDefaultReportResults({ sampleNo: 'YP20260706001', grainType: '玉米', reason: '春季普检' } as SamplingRecord) },
   { orderNo: 'QY20260706002', sampleNo: 'YP20260706002', sampleName: '50仓大豆春季普检样品', sampleCount: '2kg × 4', sampler: '李四', samplingDate: '2026-07-06', source: '内部扦样', status: '已收样', labelStatus: '检毕', sampleUnit: 'kg', approvalStatus: '审批通过', reason: '春季普检', grainType: '大豆', warehouseNo: '50', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '黑龙江', productionYear: '2026', storageDate: '2026-06-20', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '50仓1号货位', surveyNo: 'CJP-20260706-50', sender: '李四', sendTime: '2026-07-06 10:00', receiver: '质检员A', receiveTime: '2026-07-06 10:30', reportNo: 'ZJBG-NB-20260706002', reportMeta: { category: '春季普检', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '春季普检测试数据：普通不合格1项，检测指标采用出库检测标准。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-06 11:10' }, { title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-06 12:00' }], reportResults: buildDefaultReportResults({ sampleNo: 'YP20260706002', grainType: '大豆', reason: '春季普检' } as SamplingRecord) },
   { orderNo: 'QY20260706003', sampleNo: 'YP20260706003', sampleName: '49仓玉米秋季普检样品', sampleCount: '2kg × 4', sampler: '王五', samplingDate: '2026-07-06', source: '内部扦样', status: '已收样', labelStatus: '留样', sampleUnit: 'kg', approvalStatus: '审批通过', reason: '秋季普检', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-22', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '49仓1号货位', surveyNo: 'QJP-20260706-49', sender: '王五', sendTime: '2026-07-06 13:00', receiver: '质检员A', receiveTime: '2026-07-06 13:30', reportNo: 'ZJBG-NB-20260706003', reportMeta: { category: '秋季普检', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '秋季普检测试数据，检测指标采用出库检测标准。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-06 14:10' }, { title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-06 15:00' }], retainTime: '2026-07-06 15:00', retainExpireDays: 30, reportResults: buildDefaultReportResults({ sampleNo: 'YP20260706003', grainType: '玉米', reason: '秋季普检' } as SamplingRecord) },
@@ -2194,7 +2828,7 @@ const createWorkflowStatusTestRecord = (overrides: Partial<SamplingRecord>): Sam
   samplingDate: '2026-07-13',
   source: '内部扦样',
   status: '录入中',
-  reason: '入库初检',
+  reason: '入库验收',
   grainType: '玉米',
   warehouseNo: '49',
   company: '中央储备粮镇江直属库有限公司',
@@ -2207,7 +2841,6 @@ const createWorkflowStatusTestRecord = (overrides: Partial<SamplingRecord>): Sam
   packageType: '散装',
   retainCount: '1',
   inspectionCount: '1',
-  totalCopies: '2',
   keeper: '王保管',
   cargoPosition: '49仓1号货位',
   ...overrides,
@@ -2218,21 +2851,63 @@ const workflowStatusTestRecords: SamplingRecord[] = [
   createWorkflowStatusTestRecord({ orderNo: 'QY20260713002', sampleNo: 'YP20260713002', sampleName: '50仓大豆扦样完成测试样品', status: '扦样完成', grainType: '大豆', warehouseNo: '50', origin: '黑龙江', cargoPosition: '50仓1号货位', sampler: '李四', remark: '用于验证扦样完成待送样状态。' }),
   createWorkflowStatusTestRecord({ orderNo: 'QY20260713003', sampleNo: 'YP20260713003', sampleName: '49仓玉米已送样测试样品', status: '已送样', sender: '王五', sendTime: '2026-07-13 09:10', remark: '用于验证已送样待收样状态。' }),
   createWorkflowStatusTestRecord({ orderNo: 'QY20260713004', sampleNo: 'YP20260713004', sampleName: '50仓大豆留样测试样品', status: '已收样', labelStatus: '留样', approvalStatus: '审批通过', reason: '入库验收', grainType: '大豆', warehouseNo: '50', origin: '黑龙江', cargoPosition: '50仓1号货位', sampler: '李四', sender: '李四', sendTime: '2026-07-13 09:20', receiver: '质检员A', receiveTime: '2026-07-13 09:45', reportNo: 'ZJBG-NB-20260713004', reportMeta: { category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '审批通过后留样，留样状态测试数据。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-13 10:10' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-13 10:25' }, { title: '审核人：审批通过/同意', user: '李审核（审核人）', time: '2026-07-13 10:40' }, { title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-13 11:00' }], retainTime: '2026-07-13 11:00', handleTime: '2026-07-13 11:00', retainExpireDays: 60, reportResults: buildDefaultReportResults({ grainType: '大豆', reason: '入库验收' } as SamplingRecord) }),
-  createWorkflowStatusTestRecord({ orderNo: 'QY20260713005', sampleNo: 'YP20260713005', sampleName: '49仓玉米销样测试样品', status: '已收样', labelStatus: '销样', approvalStatus: '销样', reason: '入库初检', sender: '赵六', sendTime: '2026-07-13 10:00', receiver: '质检员A', receiveTime: '2026-07-13 10:30', reportNo: 'ZJBG-NB-20260713005', reportMeta: { category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '水分、杂质不合格，批准人不同意并转销样。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-13 11:10' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-13 11:25' }, { title: '审核人：审批通过/同意', user: '李审核（审核人）', time: '2026-07-13 11:40' }, { title: '批准人：不同意，转销样', user: '赵批准（批准人）', time: '2026-07-13 12:00' }], destroyTime: '2026-07-13 12:00', handleTime: '2026-07-13 12:00', reportResults: buildDefaultReportResults({ sampleNo: 'YP20260713005', grainType: '玉米', reason: '入库初检' } as SamplingRecord) }),
+]
+
+const createWarehouseMapSampleRecord = (warehouseNo: string, grainType: string, keyFailures: number, normalFailures: number): SamplingRecord => {
+  const sampleNo = `MAP202607${warehouseNo}`
+  return createWorkflowStatusTestRecord({
+    orderNo: `QY20260714${warehouseNo}`,
+    sampleNo,
+    sampleName: `${warehouseNo}仓${grainType}当前检测样品`,
+    samplingDate: '2026-07-14',
+    status: '已收样',
+    labelStatus: '检毕',
+    approvalStatus: '审批通过',
+    reason: '入库验收',
+    grainType,
+    warehouseNo,
+    cargoPosition: `${warehouseNo}仓1号货位`,
+    sender: '张三',
+    sendTime: '2026-07-14 09:00',
+    receiver: '质检员A',
+    receiveTime: '2026-07-14 09:30',
+    reportNo: `ZJBG-MAP-202607${warehouseNo}`,
+    reportMeta: { category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '仓房当前质量检测样品。' },
+    warehouseMapSample: true,
+    reportResults: buildWarehouseMapReportResults(grainType, '入库验收', keyFailures, normalFailures),
+  })
+}
+
+const warehouseMapSampleRecords: SamplingRecord[] = [
+  createWarehouseMapSampleRecord('49', '玉米', 0, 0),
+  createWarehouseMapSampleRecord('50', '大豆', 0, 2),
+  createWarehouseMapSampleRecord('51', '玉米', 0, 3),
+  createWarehouseMapSampleRecord('52', '大豆', 2, 0),
+  createWarehouseMapSampleRecord('53', '玉米', 0, 0),
 ]
 
 const internalSamplingRecords = ref<SamplingRecord[]>([
-  { orderNo: 'QY20260704001', sampleNo: 'YP20260704001', sampleName: '49仓玉米入库初检样品', sampleCount: '2kg × 4', sampler: '张三', samplingDate: '2026-07-04', source: '内部扦样', status: '已收样', labelStatus: '在检', sampleUnit: 'kg', approvalStatus: '未提交', reason: '入库初检', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-17', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '49仓1号货位', sender: '张三', sendTime: '2026-07-04 10:00', receiver: '质检员A', receiveTime: '2026-07-04 10:30', reportResults: buildDefaultReportResults({ sampleNo: 'YP20260704001', grainType: '玉米', reason: '入库初检' } as SamplingRecord) },
   { orderNo: 'QY20260704002', sampleNo: 'YP20260704002', sampleName: '50仓大豆入库验收样品', sampleCount: '2kg × 4', sampler: '李四', samplingDate: '2026-07-04', source: '内部扦样', status: '已收样', labelStatus: '待检', sampleUnit: 'kg', reason: '入库验收', grainType: '大豆', warehouseNo: '50', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '黑龙江', productionYear: '2026', storageDate: '2026-06-20', packageType: '散装', retainCount: '1', inspectionCount: '1', totalCopies: '2', keeper: '王保管', cargoPosition: '50仓1号货位', sender: '李四', sendTime: '2026-07-04 11:00', receiver: '质检员A', receiveTime: '2026-07-04 11:30' },
   ...qualityWarningTestRecords,
   ...workflowStatusTestRecords,
-])
+  ...warehouseMapSampleRecords,
+].filter(isSupportedInspectionRecord))
 
 const externalSamplingRecords = ref<SamplingRecord[]>([])
 
+const normalizeReportLifecycle = (record: SamplingRecord) => {
+  if (record.approvalStatus === '审批通过') {
+    record.reportNo = record.reportNo ?? buildReportNo(record)
+  } else {
+    record.reportNo = undefined
+  }
+}
+
+internalSamplingRecords.value.forEach(normalizeReportLifecycle)
+
 const ensureQualityWarningTestRecords = () => {
   const existingSampleNos = new Set(internalSamplingRecords.value.map((record) => record.sampleNo))
-  ;[...qualityWarningTestRecords, ...workflowStatusTestRecords].forEach((record) => {
+  ;[...qualityWarningTestRecords, ...workflowStatusTestRecords, ...warehouseMapSampleRecords].filter(isSupportedInspectionRecord).forEach((record) => {
     if (!existingSampleNos.has(record.sampleNo)) {
       internalSamplingRecords.value.push(record)
     }
@@ -2240,24 +2915,43 @@ const ensureQualityWarningTestRecords = () => {
 }
 
 const loadPersistedState = () => {
+  const ensureResponsibleAccount = () => {
+    if (systemUsers.value.some((user) => user.username === 'fuzeren')) return
+    systemUsers.value.unshift({ username: 'fuzeren', password: '123456', name: '\u5468\u8d1f\u8d23', role: '\u8d1f\u8d23\u4eba', department: '\u8d28\u91cf\u7ba1\u7406\u79d1', phone: '13800000005', status: '\u542f\u7528' })
+  }
   const raw = localStorage.getItem(storageKey)
-  if (!raw) return
+  if (!raw) {
+    ensureResponsibleAccount()
+    return
+  }
   try {
     const state = JSON.parse(raw) as Partial<PersistedState>
-    if (Array.isArray(state.internalSamplingRecords)) internalSamplingRecords.value = state.internalSamplingRecords
-    if (Array.isArray(state.externalSamplingRecords)) externalSamplingRecords.value = state.externalSamplingRecords
+    if (Array.isArray(state.internalSamplingRecords)) internalSamplingRecords.value = state.internalSamplingRecords.filter(isSupportedInspectionRecord)
+    if (Array.isArray(state.externalSamplingRecords)) externalSamplingRecords.value = state.externalSamplingRecords.filter(isSupportedInspectionRecord)
+    if (Array.isArray(state.retainRecords)) internalRetainRecords.value = state.retainRecords
+    if (Array.isArray(state.destroyRecords)) internalDestroyRecords.value = state.destroyRecords
+    internalDestroyRecords.value.forEach((record) => {
+      if (record.destroyApprovalStatus === '销样完成') record.destroyApprovalStatus = '已销样'
+      if (record.destroyApprovalStatus === '已销样') {
+        const source = internalRetainRecords.value.find((retain) => retain.retainRecordId === record.destroySourceRetainId || retain.sampleNo === record.sampleNo)
+        if (source) source.retainSampleStatus = '已销样'
+      }
+    })
     if (Array.isArray(state.systemUsers)) systemUsers.value = state.systemUsers
+    ensureResponsibleAccount()
     if (Array.isArray(state.deletedLabelNos)) deletedLabelNos.value = state.deletedLabelNos
     if (Array.isArray(state.reagentStocks)) reagentStocks.value = state.reagentStocks
     if (Array.isArray(state.reagentFlowRecords)) reagentFlowRecords.value = state.reagentFlowRecords
     ensureReagentUsageDemoRecords()
     ensureQualityWarningTestRecords()
     allSamplingRecords.value.forEach((record) => {
+      normalizeReportLifecycle(record)
       record.cargoPosition = normalizeCargoPositionValue(record)
       record.warehouseNo = cargoPositionWarehouseNo(record.cargoPosition)
     })
   } catch {
     localStorage.removeItem(storageKey)
+    ensureResponsibleAccount()
     ensureQualityWarningTestRecords()
   }
 }
@@ -2266,6 +2960,8 @@ const persistState = () => {
   const state: PersistedState = {
     internalSamplingRecords: internalSamplingRecords.value,
     externalSamplingRecords: externalSamplingRecords.value,
+    retainRecords: internalRetainRecords.value,
+    destroyRecords: internalDestroyRecords.value,
     systemUsers: systemUsers.value,
     deletedLabelNos: deletedLabelNos.value,
     reagentStocks: reagentStocks.value,
@@ -2276,6 +2972,7 @@ const persistState = () => {
 
 onMounted(() => {
   loadPersistedState()
+  loadWarehouseMapCalibration()
   persistState()
 })
 
@@ -2296,7 +2993,7 @@ const reagentCabinetTimer = window.setInterval(nextReagentCabinet, 4000)
 
 onUnmounted(() => window.clearInterval(reagentCabinetTimer))
 
-watch([internalSamplingRecords, externalSamplingRecords, systemUsers, deletedLabelNos, reagentStocks, reagentFlowRecords], persistState, { deep: true })
+watch([internalSamplingRecords, externalSamplingRecords, internalRetainRecords, internalDestroyRecords, systemUsers, deletedLabelNos, reagentStocks, reagentFlowRecords], persistState, { deep: true })
 watch(selectedWarehouse, () => {
   activeWarehousePositionIndex.value = 0
 })
@@ -2313,64 +3010,152 @@ const openSamplingLabel = (orderNo: string) => {
 
 const openSampleLabelPrint = (sampleNo: string) => {
   selectedSamplingNo.value = sampleNo
-  const target = labelRecords.value.find((item) => item.sampleNo === sampleNo)
-  selectedLabelStatus.value = String(target?.labelStatus ?? '待检')
   showSamplingLabel.value = true
 }
 
-const syncLabelStatus = () => {
+const printSampleLabel = () => {
   const target = allSamplingRecords.value.find((item) => item.sampleNo === selectedSamplingNo.value)
-  if (target) {
-    target.labelStatus = selectedLabelStatus.value
-  }
+  printPage()
+  if (target) target.labelPrintStatus = '已打印'
 }
 
-const startInspection = (sampleNo: string) => {
-  const target = reportRecords.value.find((item) => item.sampleNo === sampleNo)
-  if (target) {
-    target.labelStatus = '在检'
-    target.approvalStatus = '未提交'
-    target.reportResults = target.reportResults ?? buildDefaultReportResults(target)
+const confirmAction = (
+  message: string,
+  action: () => void,
+  options: { title?: string; confirmText?: string; danger?: boolean } = {},
+) => {
+  confirmDialog.value = {
+    title: options.title ?? '操作确认',
+    message,
+    confirmText: options.confirmText ?? '确认',
+    danger: options.danger ?? false,
   }
+  pendingConfirmAction.value = action
+  showConfirmDialog.value = true
+}
+
+const closeConfirmDialog = () => {
+  showConfirmDialog.value = false
+  pendingConfirmAction.value = null
+}
+
+const acceptConfirmDialog = () => {
+  const action = pendingConfirmAction.value
+  showConfirmDialog.value = false
+  pendingConfirmAction.value = null
+  action?.()
+}
+
+const openInspectionScanDialog = (sampleNo: string) => {
+  selectedSamplingNo.value = sampleNo
+  inspectionScanValue.value = ''
+  showInspectionScanDialog.value = true
+}
+
+const readInspectionSampleCode = () => {
+  inspectionScanValue.value = displaySampleNo(selectedReportRecord.value)
+}
+
+const confirmInspectionScan = () => {
+  const target = reportRecords.value.find((item) => item.sampleNo === selectedSamplingNo.value)
+  if (!target) return
+  if (inspectionScanValue.value.trim() !== displaySampleNo(target)) return
+  confirmAction(
+    `确认扫码录入样品 ${displaySampleNo(target)} 并进入检验流程吗？`,
+    () => {
+      target.labelStatus = '在检'
+      target.approvalStatus = '未提交'
+      target.reportResults = target.reportResults ?? buildDefaultReportResults(target)
+      target.inspectionScanTime = currentDateTimeText()
+      target.scanOperator = currentLoginUser.value?.name ?? '系统'
+      showInspectionScanDialog.value = false
+    },
+    { title: '扫码录入确认', confirmText: '确认录入' },
+  )
 }
 
 const openReportForm = (sampleNo: string) => {
   selectedSamplingNo.value = sampleNo
   if (canEditReportResult(selectedReportRecord.value)) {
-    reportMetaForm.value = selectedReportRecord.value.reportMeta ?? { category: '监督检验', compiler: currentLoginUser.value?.name ?? '王帅', reviewer: '李审核', approver: '赵批准', remark: '' }
-    showReportForm.value = true
+    const target = selectedReportRecord.value
+    confirmAction(
+      `确认进入样品 ${displaySampleNo(target)} 的质检结果录入吗？`,
+      () => {
+        reportMetaForm.value = {
+          category: '监督检验',
+          compiler: currentLoginUser.value?.name ?? '王帅',
+          reviewer: '李审核',
+          approver: '赵批准',
+          remark: '',
+          qualityGrade: qualityGradeText(target),
+          qualified: qualifiedText(target),
+          ...target.reportMeta,
+        }
+        showReportForm.value = true
+      },
+      { title: '结果录入确认', confirmText: '进入录入' },
+    )
   }
 }
 
 const reportApprovalStatusText = (record: SamplingRecord) => {
+  if (record.approvalStatus === '审批通过' && record.reportNo) return '审批通过 / 报告已生成'
+  if (record.approvalStatus === '销样') return '审批未通过'
+  if (record.approvalStatus === '退回修改') return '退回修改'
   return record.approvalStep ? '审批中' : record.approvalStatus ?? '未提交'
 }
+
+const reportProcessStatusText = (record: SamplingRecord) => {
+  if (record.approvalStatus === '审批通过' && record.reportNo) return '质检报告已生成'
+  if (record.approvalStatus === '销样' || record.labelStatus === '销样') return '审批未通过'
+  if (record.approvalStatus === '退回修改') return '待修改结果'
+  if (record.approvalStep) return `${record.approvalStep}审批中`
+  if (record.labelStatus === '检毕') return '待提交审批'
+  if (record.labelStatus === '在检') return '待录入结果'
+  return '待扫码录入'
+}
+
+const reportProcessStatusTone = (record: SamplingRecord) => {
+  if (record.approvalStatus === '审批通过' && record.reportNo) return 'complete'
+  if (record.approvalStatus === '销样' || record.labelStatus === '销样') return 'failed'
+  if (record.approvalStatus === '退回修改') return 'returned'
+  if (record.approvalStep) return 'approval'
+  if (record.labelStatus === '在检') return 'active'
+  return 'pending'
+}
+
+const reportHasFormalReport = (record: SamplingRecord) => record.approvalStatus === '审批通过' && Boolean(record.reportNo)
 
 const canEditReportResult = (record: SamplingRecord) => {
   return record.labelStatus === '在检' && !record.approvalStep
 }
 
-const addApprovalHistory = (record: SamplingRecord, title: string) => {
+const addApprovalHistory = (record: SamplingRecord, title: string, opinion = '') => {
   const user = currentLoginUser.value
   record.approvalHistory = [
     ...(record.approvalHistory ?? []),
-    { title, user: user ? `${user.name}（${user.role}）` : '系统', time: currentDateTimeText() },
+    { title, user: user ? `${user.name}（${user.role}）` : '系统', time: currentDateTimeText(), ...(opinion.trim() ? { opinion: opinion.trim() } : {}) },
   ]
 }
 
+const reportApprovalHistory = (record: SamplingRecord) => {
+  return (record.approvalHistory ?? []).filter((item) => !item.title.startsWith('编制人：'))
+}
+
 const approvalFlowItems = (record: SamplingRecord) => {
-  const history = record.approvalHistory ?? []
+  const history = reportApprovalHistory(record)
   return [
-    { name: '提交送审', state: history.some((item) => item.title.includes('提交')) || record.approvalStep || record.approvalStatus === '审批通过' ? 'done' : 'todo', icon: Send, desc: '报告提交' },
-    { name: '编制人审批', state: record.approvalStep === '编制人' ? 'active' : history.some((item) => item.title.includes('编制人')) || ['审核人', '批准人'].includes(String(record.approvalStep)) || record.approvalStatus === '审批通过' ? 'done' : 'todo', icon: Edit3, desc: '结果编制' },
-    { name: '审核人审批', state: record.approvalStep === '审核人' ? 'active' : history.some((item) => item.title.includes('审核人')) || record.approvalStep === '批准人' || record.approvalStatus === '审批通过' ? 'done' : 'todo', icon: ClipboardList, desc: '复核报告' },
+    { name: '结果送审', state: history.some((item) => item.title.includes('提交')) || record.approvalStep || record.approvalStatus === '审批通过' ? 'done' : 'todo', icon: Send, desc: '质检结果提交' },
+    { name: '审核人审批', state: record.approvalStep === '审核人' ? 'active' : history.some((item) => item.title.includes('审核人')) || ['负责人', '批准人'].includes(String(record.approvalStep)) || record.approvalStatus === '审批通过' ? 'done' : 'todo', icon: ClipboardList, desc: '质检结果审核' },
+    { name: '负责人审批', state: record.approvalStep === '负责人' ? 'active' : history.some((item) => item.title.includes('负责人')) || record.approvalStep === '批准人' || record.approvalStatus === '审批通过' ? 'done' : 'todo', icon: Edit3, desc: '质量负责人复核' },
     { name: '批准人审批', state: record.approvalStep === '批准人' ? 'active' : record.approvalStatus === '审批通过' ? 'done' : 'todo', icon: CheckCircle2, desc: '批准放行' },
-    { name: record.labelStatus === '销样' ? '销样管理' : '留样管理', state: record.labelStatus === '留样' || record.labelStatus === '销样' ? record.labelStatus === '销样' ? 'danger' : 'done' : 'todo', icon: record.labelStatus === '销样' ? Trash2 : PackageCheck, desc: record.labelStatus === '销样' ? '异常处置' : '样品留存' },
+    { name: '质检报告生成', state: record.approvalStatus === '审批通过' && record.reportNo ? 'done' : 'todo', icon: BookOpenText, desc: record.reportNo ? '正式报告已生成' : '批准通过后生成' },
   ]
 }
 
 const openApprovalFlow = (sampleNo: string) => {
   selectedSamplingNo.value = sampleNo
+  approvalOpinion.value = ''
   showApprovalFlow.value = true
 }
 
@@ -2511,31 +3296,56 @@ const addReagentLedger = () => {
 
 const saveReportResult = () => {
   const target = reportRecords.value.find((item) => item.sampleNo === selectedSamplingNo.value)
-  if (target && canEditReportResult(target)) {
-    target.labelStatus = '在检'
-    target.approvalStatus = '未提交'
-    target.reportResults = target.reportResults ?? buildDefaultReportResults(target)
-    target.reportMeta = { ...reportMetaForm.value }
-  }
-  showReportForm.value = false
+  if (!target || !canEditReportResult(target)) return
+  confirmAction(
+    `确认保存样品 ${displaySampleNo(target)} 的质检结果吗？`,
+    () => {
+      target.labelStatus = '在检'
+      target.approvalStatus = '未提交'
+      target.reportResults = target.reportResults ?? buildDefaultReportResults(target)
+      target.reportMeta = { ...reportMetaForm.value }
+      showReportForm.value = false
+    },
+    { title: '保存结果确认', confirmText: '确认保存' },
+  )
 }
 
 const submitReportResult = () => {
   const target = reportRecords.value.find((item) => item.sampleNo === selectedSamplingNo.value)
-  if (target && canEditReportResult(target)) {
-    target.labelStatus = '检毕'
-    target.approvalStatus = '审批中'
-    target.approvalStep = '编制人'
-    target.reportNo = target.reportNo ?? buildReportNo(target)
-    target.reportResults = target.reportResults ?? buildDefaultReportResults(target)
-    target.reportMeta = { ...reportMetaForm.value }
-    target.approvalHistory = [{ title: '提交：送审', user: `${currentLoginUser.value?.name ?? '编制人'}（编制人）`, time: currentDateTimeText() }]
-  }
-  showReportForm.value = false
+  if (!target || !canEditReportResult(target)) return
+  confirmAction(
+    `确认提交样品 ${displaySampleNo(target)} 的质检结果进入审批吗？提交后将暂时不能修改。`,
+    () => {
+      target.labelStatus = '检毕'
+      target.approvalStatus = '审批中'
+      target.approvalStep = '审核人'
+      target.reportNo = undefined
+      target.reportResults = target.reportResults ?? buildDefaultReportResults(target)
+      target.reportMeta = { ...reportMetaForm.value }
+      target.approvalHistory = [
+        ...(target.approvalHistory ?? []).filter((item) => !item.title.includes('提交：送审')),
+        { title: '提交：送审', user: `${currentLoginUser.value?.name ?? '编制人'}（编制人）`, time: currentDateTimeText() },
+      ]
+      showReportForm.value = false
+    },
+    { title: '提交审批确认', confirmText: '确认提交' },
+  )
 }
 
 const openReportView = (sampleNo: string) => {
+  const target = reportRecords.value.find((item) => item.sampleNo === sampleNo)
+  if (!target || !reportHasFormalReport(target)) return
   selectedSamplingNo.value = sampleNo
+  reportViewMode.value = 'report'
+  showReportView.value = true
+}
+
+const openQualityResultView = (sampleNo: string) => {
+  const target = reportRecords.value.find((item) => item.sampleNo === sampleNo)
+  if (!target?.reportResults) return
+  selectedSamplingNo.value = sampleNo
+  reportViewMode.value = 'result'
+  showApprovalFlow.value = false
   showReportView.value = true
 }
 
@@ -2584,13 +3394,9 @@ const openInspectionOverviewDrilldown = (mode: InspectionOverviewDrilldown) => {
   if (mode === 'sampling') inspectionOverviewTodayDate.value = '2026-07-04'
 }
 
-const approveReport = (sampleNo: string, action: 'pass' | 'return' | 'destroy') => {
-  selectedSamplingNo.value = sampleNo
-  const target = reportRecords.value.find((item) => item.sampleNo === sampleNo)
-  if (!target || !canApproveReport(target)) return
-
+const executeReportApproval = (target: SamplingRecord, action: 'pass' | 'return', opinion = '') => {
   if (action === 'return') {
-    addApprovalHistory(target, `${target.approvalStep}：不同意，退回修改`)
+    addApprovalHistory(target, `${target.approvalStep}：不同意，退回修改`, opinion)
     target.labelStatus = '在检'
     target.approvalStatus = '退回修改'
     target.approvalStep = undefined
@@ -2599,33 +3405,46 @@ const approveReport = (sampleNo: string, action: 'pass' | 'return' | 'destroy') 
     return
   }
 
-  if (action === 'destroy' && target.approvalStep === '批准人') {
-    addApprovalHistory(target, '批准人：不同意，转销样')
-    target.labelStatus = '销样'
-    target.approvalStatus = '销样'
-    target.approvalStep = undefined
-    target.destroyTime = target.approvalHistory?.[target.approvalHistory.length - 1]?.time
-    target.handleTime = target.destroyTime
-    return
-  }
-
-  if (target.approvalStep === '编制人') {
-    addApprovalHistory(target, '编制人：审批通过/同意')
-    target.approvalStep = '审核人'
+  if (target.approvalStep === '审核人') {
+    addApprovalHistory(target, '审核人：审批通过/同意', opinion)
+    target.approvalStep = '负责人'
     target.approvalStatus = '审批中'
-  } else if (target.approvalStep === '审核人') {
-    addApprovalHistory(target, '审核人：审批通过/同意')
+  } else if (target.approvalStep === '负责人') {
+    addApprovalHistory(target, '负责人：审批通过/同意', opinion)
     target.approvalStep = '批准人'
     target.approvalStatus = '审批中'
   } else if (target.approvalStep === '批准人') {
-    addApprovalHistory(target, '批准人：审批通过/同意')
-    target.labelStatus = '留样'
+    addApprovalHistory(target, '批准人：审批通过/同意', opinion)
+    target.labelStatus = '检毕'
     target.approvalStatus = '审批通过'
     target.approvalStep = undefined
-    target.retainExpireDays = target.retainExpireDays ?? 30
-    target.retainTime = target.approvalHistory?.[target.approvalHistory.length - 1]?.time
-    target.handleTime = target.retainTime
+    target.reportNo = buildReportNo(target)
+    addApprovalHistory(target, '质检报告生成：正式报告已生成')
+    target.handleTime = target.approvalHistory?.[target.approvalHistory.length - 1]?.time
   }
+}
+
+const approveReport = (sampleNo: string, action: 'pass' | 'return') => {
+  selectedSamplingNo.value = sampleNo
+  const target = reportRecords.value.find((item) => item.sampleNo === sampleNo)
+  if (!target || !canApproveReport(target)) return
+
+  const opinion = approvalOpinion.value.trim()
+  const confirmMessage = action === 'pass'
+    ? `确认以“${target.approvalStep}”身份通过样品 ${displaySampleNo(target)} 的质检结果吗？`
+    : `确认退回样品 ${displaySampleNo(target)} 的质检结果进行修改吗？`
+  confirmAction(
+    confirmMessage,
+    () => {
+      executeReportApproval(target, action, opinion)
+      approvalOpinion.value = ''
+    },
+    {
+      title: action === 'pass' ? '审批通过确认' : '退回修改确认',
+      confirmText: action === 'pass' ? '确认通过' : '确认退回',
+      danger: action === 'return',
+    },
+  )
 }
 
 const selectedReagentFlowRecord = computed<ReagentFlowRecord | undefined>(() => reagentFlowRecords.value.find((item) => item.recordNo === selectedReagentRecordNo.value) ?? reagentFlowRecords.value[0])
@@ -2736,7 +3555,6 @@ const createSamplingForm = (overrides: Partial<SamplingForm> = {}): SamplingForm
   packageType: '散装',
   retainCount: '1',
   inspectionCount: '1',
-  totalCopies: '2',
   keeper: '王保管',
   remark: '样品用于质量检验流程演示。',
   surveyNo: '',
@@ -2891,113 +3709,176 @@ const deleteUser = (username: string) => {
   if (index >= 0 && systemUsers.value.length > 1) systemUsers.value.splice(index, 1)
 }
 
-const warehouseMarkers = [
-  {
-    code: '49仓',
-    x: 37.8,
-    y: 20.0,
-    status: 'normal',
-    grainType: '小麦',
-    stockQuantity: '7,280 吨',
-    capacityRate: '87%',
-    qualityStatus: '正常',
-    qualityLevel: '一等',
-    impurity: '0.6%',
-    latestTestTime: '2026-06-22',
-    warningCount: 0,
-    taskStatus: '已完成',
-  },
-  {
-    code: '50仓',
-    x: 43.8,
-    y: 23.6,
-    status: 'warning',
-    grainType: '大豆',
-    stockQuantity: '8,160 吨',
-    capacityRate: '81%',
-    qualityStatus: '预警',
-    qualityLevel: '二等',
-    impurity: '0.8%',
-    latestTestTime: '2026-06-20',
-    warningCount: 1,
-    taskStatus: '待审核',
-  },
-  {
-    code: '51仓',
-    x: 49.0,
-    y: 27.2,
-    status: 'warning',
-    grainType: '小麦',
-    stockQuantity: '8,740 吨',
-    capacityRate: '82%',
-    qualityStatus: '预警',
-    qualityLevel: '二等',
-    impurity: '0.9%',
-    latestTestTime: '2026-06-18',
-    warningCount: 2,
-    taskStatus: '检验中',
-  },
-  {
-    code: '52仓',
-    x: 55.0,
-    y: 32.0,
-    status: 'normal',
-    grainType: '大豆',
-    stockQuantity: '7,930 吨',
-    capacityRate: '90%',
-    qualityStatus: '正常',
-    qualityLevel: '一等',
-    impurity: '0.5%',
-    latestTestTime: '2026-06-25',
-    warningCount: 0,
-    taskStatus: '已完成',
-  },
-  {
-    code: '53仓',
-    x: 59.3,
-    y: 35.1,
-    status: 'normal',
-    grainType: '小麦',
-    stockQuantity: '8,520 吨',
-    capacityRate: '86%',
-    qualityStatus: '正常',
-    qualityLevel: '一等',
-    impurity: '0.6%',
-    latestTestTime: '2026-06-24',
-    warningCount: 0,
-    taskStatus: '已完成',
-  },
+// The warehouse roofs form a staggered diagonal grid in the aerial image.
+// Keeping the coordinates explicit makes future alignment against a new base map straightforward.
+const warehouseMarkerCoordinates: WarehouseMarkerCoordinate[] = [
+  { x: 38.0, y: 19.5 }, { x: 43.6, y: 23.6 }, { x: 48.7, y: 27.3 }, { x: 54.4, y: 31.8 },
+  { x: 59.6, y: 35.2 }, { x: 66.2, y: 39.9 }, { x: 71.3, y: 43.7 }, { x: 77.5, y: 48.2 }, { x: 57.1, y: 41.2 },
+  { x: 26.2, y: 31.6 }, { x: 32.6, y: 35.6 }, { x: 39.0, y: 39.6 }, { x: 45.4, y: 43.6 }, { x: 51.8, y: 47.6 }, { x: 58.2, y: 51.6 },
+  { x: 20.9, y: 38.0 }, { x: 27.3, y: 42.0 }, { x: 33.7, y: 46.0 }, { x: 40.1, y: 50.0 }, { x: 46.5, y: 54.0 }, { x: 52.9, y: 58.0 }, { x: 59.3, y: 62.0 },
+  { x: 17.2, y: 45.0 }, { x: 23.6, y: 49.0 }, { x: 30.0, y: 53.0 }, { x: 36.4, y: 57.0 }, { x: 42.8, y: 61.0 }, { x: 49.2, y: 65.0 }, { x: 55.6, y: 69.0 }, { x: 62.0, y: 73.0 },
 ]
+const warehouseMapCalibrationStorageKey = 'quality-management-warehouse-map-calibration-v1'
+const activeWarehouseMarkerCoordinates = ref<WarehouseMarkerCoordinate[]>(warehouseMarkerCoordinates.map((point) => ({ ...point })))
 
-const selectedWarehouseData = computed(() => {
-  return warehouseMarkers.find((item) => item.code === selectedWarehouse.value) ?? warehouseMarkers[0]
+const warehouseMarkers = computed(() => activeWarehouseMarkerCoordinates.value.map((point, index) => {
+  const warehouseNo = index + 49
+  const stockQuantity = [7280, 8160, 8740, 7930, 8520][index % 5] + Math.floor(index / 5) * 120
+  return {
+    code: `${warehouseNo}仓`,
+    ...point,
+    grainType: warehouseNo % 2 === 0 ? '大豆' : '小麦',
+    stockQuantity: `${stockQuantity.toLocaleString()} 吨`,
+    qualityLevel: index % 4 === 1 ? '二等' : '一等',
+    latestTestTime: `2026-06-${String(18 + (index % 8)).padStart(2, '0')}`,
+  }
+}))
+
+const warehouseMapCalibrationSource = computed(() => {
+  const coordinates = activeWarehouseMarkerCoordinates.value
+    .map((point) => `  { x: ${point.x.toFixed(1)}, y: ${point.y.toFixed(1)} },`)
+    .join('\n')
+  return `const warehouseMarkerCoordinates: WarehouseMarkerCoordinate[] = [\n${coordinates}\n]`
 })
 
-const warehousePositionRows = (warehouse: typeof warehouseMarkers[number]) => {
-  const warehouseNo = warehouse.code.replace('仓', '')
-  const warehouseRecords = allSamplingRecords.value.filter((record) => cargoPositionWarehouseNo(normalizedCargoPosition(record)) === warehouseNo)
-  const latestRecord = warehouseRecords.find((record) => record.receiveTime) ?? warehouseRecords[0]
-  const completedRecords = warehouseRecords.filter((record) => completedReportRecords.value.includes(record))
-  const warningCount = completedRecords.filter((record) => ['level1', 'level2'].includes(qualityRiskLevel(record).code)).length
-  const alarmCount = completedRecords.filter((record) => qualityRiskLevel(record).code === 'level3').length
-  const unqualifiedSampleCount = completedRecords.filter((record) => reportUnqualifiedCount(record) > 0).length
+const loadWarehouseMapCalibration = () => {
+  const raw = localStorage.getItem(warehouseMapCalibrationStorageKey)
+  if (!raw) return
+  try {
+    const coordinates = JSON.parse(raw) as WarehouseMarkerCoordinate[]
+    if (!Array.isArray(coordinates) || !coordinates.length) return
+    const validCoordinates = coordinates.filter((point) => Number.isFinite(point?.x) && Number.isFinite(point?.y))
+    if (validCoordinates.length) {
+      activeWarehouseMarkerCoordinates.value = validCoordinates.map((point) => ({
+        x: Math.max(0, Math.min(100, Number(point.x.toFixed(1)))),
+        y: Math.max(0, Math.min(100, Number(point.y.toFixed(1)))),
+      }))
+    }
+  } catch {
+    localStorage.removeItem(warehouseMapCalibrationStorageKey)
+  }
+}
 
+const warehouseMapCoordinateFromPointer = (event: PointerEvent | MouseEvent) => {
+  const rect = warehouseMapShell.value?.getBoundingClientRect()
+  if (!rect) return null
+  return {
+    x: Math.max(0, Math.min(100, Number((((event.clientX - rect.left) / rect.width) * 100).toFixed(1)))),
+    y: Math.max(0, Math.min(100, Number((((event.clientY - rect.top) / rect.height) * 100).toFixed(1)))),
+  }
+}
+
+const updateWarehouseMapCalibrationPointer = (event: PointerEvent) => {
+  if (!warehouseMapCalibrationMode.value) return
+  const coordinate = warehouseMapCoordinateFromPointer(event)
+  if (!coordinate) return
+  warehouseMapCalibrationHover.value = coordinate
+  const index = warehouseMapCalibrationDragIndex.value
+  if (index !== null && activeWarehouseMarkerCoordinates.value[index]) {
+    activeWarehouseMarkerCoordinates.value.splice(index, 1, coordinate)
+  }
+}
+
+const handleWarehouseMapClick = (event: MouseEvent) => {
+  if (!warehouseMapCalibrationMode.value) return
+  const target = event.target as HTMLElement
+  if (target.closest('.warehouse-marker, .warehouse-info-card, .map-legend, .map-calibration-tools, .map-calibration-panel')) return
+  const coordinate = warehouseMapCoordinateFromPointer(event)
+  if (!coordinate) return
+  activeWarehouseMarkerCoordinates.value.push(coordinate)
+  warehouseMapCalibrationSelectedIndex.value = activeWarehouseMarkerCoordinates.value.length - 1
+}
+
+const selectWarehouseMarker = (index: number) => {
+  if (warehouseMapCalibrationMode.value) {
+    warehouseMapCalibrationSelectedIndex.value = index
+    return
+  }
+  selectedWarehouse.value = warehouseMarkers.value[index]?.code ?? selectedWarehouse.value
+}
+
+const startWarehouseMapCoordinateDrag = (index: number, event: PointerEvent) => {
+  if (!warehouseMapCalibrationMode.value) return
+  event.preventDefault()
+  warehouseMapCalibrationSelectedIndex.value = index
+  warehouseMapCalibrationDragIndex.value = index
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  updateWarehouseMapCalibrationPointer(event)
+}
+
+const finishWarehouseMapCoordinateDrag = () => {
+  warehouseMapCalibrationDragIndex.value = null
+}
+
+const toggleWarehouseMapCalibration = () => {
+  warehouseMapCalibrationMode.value = !warehouseMapCalibrationMode.value
+  warehouseMapCalibrationHover.value = null
+  warehouseMapCalibrationSelectedIndex.value = null
+  finishWarehouseMapCoordinateDrag()
+}
+
+const deleteSelectedWarehouseMapCoordinate = () => {
+  const index = warehouseMapCalibrationSelectedIndex.value
+  if (index === null || activeWarehouseMarkerCoordinates.value.length <= 1) return
+  activeWarehouseMarkerCoordinates.value.splice(index, 1)
+  warehouseMapCalibrationSelectedIndex.value = null
+}
+
+const resetWarehouseMapCalibration = () => {
+  activeWarehouseMarkerCoordinates.value = warehouseMarkerCoordinates.map((point) => ({ ...point }))
+  warehouseMapCalibrationSelectedIndex.value = null
+  warehouseMapCalibrationNotice.value = '已恢复源码点位'
+}
+
+const copyWarehouseMapCalibration = async () => {
+  try {
+    await navigator.clipboard.writeText(warehouseMapCalibrationSource.value)
+    warehouseMapCalibrationNotice.value = '坐标已复制'
+  } catch {
+    warehouseMapCalibrationNotice.value = '复制失败，请检查浏览器权限'
+  }
+}
+
+const clearWarehouseMapCalibrationHover = () => {
+  if (warehouseMapCalibrationDragIndex.value === null) warehouseMapCalibrationHover.value = null
+}
+
+watch(activeWarehouseMarkerCoordinates, (coordinates) => {
+  localStorage.setItem(warehouseMapCalibrationStorageKey, JSON.stringify(coordinates))
+}, { deep: true })
+
+const selectedWarehouseData = computed(() => {
+  return warehouseMarkers.value.find((item) => item.code === selectedWarehouse.value) ?? warehouseMarkers.value[0]
+})
+
+const warehouseRiskPresentation = (record?: SamplingRecord) => {
+  const risk = record ? qualityRiskLevel(record) : { code: 'normal' as QualityRiskCode, label: '正常' }
+  if (risk.code === 'level1') return { status: 'alarm', qualityStatus: risk.label }
+  if (risk.code === 'level2') return { status: 'warning', qualityStatus: risk.label }
+  if (risk.code === 'level3') return { status: 'level3', qualityStatus: risk.label }
+  return { status: 'normal', qualityStatus: risk.label }
+}
+
+const warehousePositionRows = (warehouse: typeof warehouseMarkers.value[number]) => {
+  const warehouseNo = warehouse.code.replace('仓', '')
+  const currentSample = currentWarehouseSampleRecordMap.value.get(warehouseNo)
+  const presentation = warehouseRiskPresentation(currentSample)
   return [{
     position: `${warehouseNo}仓1号货位`,
-    status: alarmCount ? 'alarm' : warningCount ? 'warning' : 'normal',
-    qualityStatus: alarmCount ? '报警' : warningCount ? '预警' : '正常',
-    grainType: warehouse.grainType,
+    status: presentation.status,
+    qualityStatus: presentation.qualityStatus,
+    grainType: currentSample?.grainType ?? warehouse.grainType,
     stockQuantity: warehouse.stockQuantity,
-    qualityLevel: alarmCount ? '待复检' : warningCount ? '待复核' : warehouse.qualityLevel,
-    latestTestTime: latestRecord?.receiveTime?.slice(0, 10) ?? latestRecord?.samplingDate ?? warehouse.latestTestTime,
-    unqualifiedSampleCount,
+    qualityLevel: currentSample ? reportQualityGrade(currentSample) : warehouse.qualityLevel,
+    latestTestTime: currentSample?.receiveTime?.slice(0, 10) ?? currentSample?.samplingDate ?? warehouse.latestTestTime,
   }]
 }
 
-const warehouseMarkerStatus = (warehouse: typeof warehouseMarkers[number]) => {
+const warehouseMarkerStatus = (warehouse: typeof warehouseMarkers.value[number]) => {
   const rows = warehousePositionRows(warehouse)
   if (rows.some((item) => item.status === 'alarm')) return 'alarm'
   if (rows.some((item) => item.status === 'warning')) return 'warning'
+  if (rows.some((item) => item.status === 'level3')) return 'level3'
   return 'normal'
 }
 
@@ -3007,8 +3888,10 @@ const selectedWarehousePositions = computed(() => {
 
 const selectedWarehousePositionData = computed(() => selectedWarehousePositions.value[activeWarehousePositionIndex.value % selectedWarehousePositions.value.length])
 
+const warehouseRiskCount = computed(() => currentWarehouseSampleRecords.value.filter((record) => qualityRiskLevel(record).code !== 'normal').length)
+
 const totalStock = computed(() => {
-  return warehouseMarkers.reduce((total, item) => total + Number(item.stockQuantity.replace(/[^0-9]/g, '')), 0)
+  return warehouseMarkers.value.reduce((total, item) => total + Number(item.stockQuantity.replace(/[^0-9]/g, '')), 0)
 })
 
 const overviewCards = computed(() => [
@@ -3016,7 +3899,7 @@ const overviewCards = computed(() => [
   { label: '仓房总数', value: `43 座` },
   { label: '在储品种', value: '2 类' },
   { label: '质量合格率', value: '92.0%' },
-  { label: '风险仓房', value: '2 座' },
+  { label: '风险仓房', value: `${warehouseRiskCount.value} 座` },
   { label: '待检批次', value: '4 批' },
 ])
 
@@ -3169,16 +4052,50 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 </div>
               </div>
 
-              <div class="warehouse-map-shell">
+              <div
+                ref="warehouseMapShell"
+                class="warehouse-map-shell"
+                :class="{ calibrating: warehouseMapCalibrationMode }"
+                @pointermove="updateWarehouseMapCalibrationPointer"
+                @pointerleave="clearWarehouseMapCalibrationHover"
+                @pointerup="finishWarehouseMapCoordinateDrag"
+                @pointercancel="finishWarehouseMapCoordinateDrag"
+                @click="handleWarehouseMapClick"
+              >
+                <div class="map-calibration-tools" @click.stop>
+                  <button
+                    type="button"
+                    :class="{ active: warehouseMapCalibrationMode }"
+                    :aria-pressed="warehouseMapCalibrationMode"
+                    :title="warehouseMapCalibrationMode ? '关闭点位校准' : '开启点位校准'"
+                    @click="toggleWarehouseMapCalibration"
+                  >
+                    <Crosshair :size="15" />
+                  </button>
+                </div>
+                <div v-if="warehouseMapCalibrationMode" class="map-calibration-panel" @click.stop>
+                  <div>
+                    <span>{{ warehouseMapCalibrationHover ? `x ${warehouseMapCalibrationHover.x.toFixed(1)} / y ${warehouseMapCalibrationHover.y.toFixed(1)}` : 'x — / y —' }}</span>
+                    <b>{{ activeWarehouseMarkerCoordinates.length }} 点</b>
+                  </div>
+                  <div class="map-calibration-actions">
+                    <button type="button" title="复制当前点位坐标" @click="copyWarehouseMapCalibration"><Copy :size="14" /></button>
+                    <button type="button" title="删除选中点位" :disabled="warehouseMapCalibrationSelectedIndex === null" @click="deleteSelectedWarehouseMapCoordinate"><Trash2 :size="14" /></button>
+                    <button type="button" title="恢复源码默认点位" @click="resetWarehouseMapCalibration"><RotateCcw :size="14" /></button>
+                  </div>
+                  <small v-if="warehouseMapCalibrationNotice">{{ warehouseMapCalibrationNotice }}</small>
+                </div>
                 <img class="warehouse-map-image" src="/beijing.png" alt="镇江库区图片" />
                 <button
-                  v-for="marker in warehouseMarkers"
+                  v-for="(marker, index) in warehouseMarkers"
                   :key="marker.code"
                   class="warehouse-marker"
-                  :class="[warehouseMarkerStatus(marker), { selected: selectedWarehouse === marker.code }]"
+                  :class="[warehouseMarkerStatus(marker), { selected: !warehouseMapCalibrationMode && selectedWarehouse === marker.code, calibrating: warehouseMapCalibrationMode, 'calibration-selected': warehouseMapCalibrationMode && warehouseMapCalibrationSelectedIndex === index }]"
                   :style="{ left: `${marker.x}%`, top: `${marker.y}%` }"
                   type="button"
-                  @click="selectedWarehouse = marker.code"
+                  :title="warehouseMapCalibrationMode ? `${marker.code}：拖动微调` : marker.code"
+                  @pointerdown.stop="startWarehouseMapCoordinateDrag(index, $event)"
+                  @click.stop="selectWarehouseMarker(index)"
                 >
                   <span>{{ marker.code }}</span>
                 </button>
@@ -3213,16 +4130,13 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                       <span>粮食质量等级</span>
                       <b>{{ selectedWarehousePositionData.qualityLevel }}</b>
                     </div>
-                    <div>
-                      <span>不合格样品数量</span>
-                      <b>{{ selectedWarehousePositionData.unqualifiedSampleCount }} 个</b>
-                    </div>
                   </div>
                 </aside>
                 <div class="map-legend">
                   <span><i class="normal"></i>正常</span>
-                  <span><i class="warning"></i>一级/二级预警</span>
-                  <span><i class="alarm"></i>三级预警</span>
+                  <span><i class="level3"></i>三级预警</span>
+                  <span><i class="warning"></i>二级预警</span>
+                  <span><i class="alarm"></i>一级预警</span>
                 </div>
               </div>
             </section>
@@ -3338,21 +4252,28 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
 
           <div v-if="inspectionTab === 'overview'" class="inspection-overview">
             <div class="inspection-kpis">
-              <button v-for="item in inspectionKpis" :key="item.label" type="button" @click="openInspectionOverviewDrilldown(item.label === '今日扦样' ? 'sampling' : item.label === '待检样品' ? 'pending' : item.label === '待审报告' ? 'approval' : item.label === '留样数量' ? 'retain' : 'destroy')"><span>{{ item.label }}</span><strong>{{ item.value }}</strong></button>
+              <button v-for="item in inspectionKpis" :key="item.label" type="button" @click="openInspectionTab(item.tab)">
+                <span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>可查看 <span aria-hidden="true">→</span></small>
+              </button>
             </div>
 
-            <div class="flow-visual-card">
-              <div class="panel-head"><h2>检化验流程总览</h2><span>数据一次录入，样品全程流转</span></div>
-              <div class="flow-nodes">
-                <template v-for="(node, index) in flowNodes" :key="node.name">
-                  <button type="button" class="flow-node" :class="node.status" @click="openInspectionFlowNode(node.tab)">
-                    <em>{{ String(index + 1).padStart(2, '0') }}</em>
-                    <div class="flow-node-circle"><component :is="node.icon" :size="18" stroke-width="2.2" /></div>
-                    <span>{{ node.name }}</span>
-                    <b>{{ node.count }}</b>
+            <div class="upcoming-business-card">
+              <div class="panel-head"><div><h2>即将需要进行的业务</h2><span>优先处理当前队列中最紧急的一项业务</span></div><b>{{ upcomingBusinessTotal }} <small>项待办</small></b></div>
+              <div class="upcoming-business-layout">
+                <div class="upcoming-business-chart" aria-label="待办业务占比分布">
+                  <svg viewBox="0 0 42 42" role="img" aria-label="待办业务占比环形图">
+                    <circle class="upcoming-chart-track" cx="21" cy="21" r="15.9" />
+                    <circle v-for="item in upcomingBusinessChartSegments" :key="item.key" :class="['upcoming-chart-segment', item.tone]" cx="21" cy="21" r="15.9" :stroke-dasharray="`${item.percent} ${100 - item.percent}`" :stroke-dashoffset="`${-item.offset}`" />
+                  </svg>
+                  <div><strong>{{ upcomingBusinessTotal }}</strong><span>待办总数</span></div>
+                </div>
+                <div class="upcoming-business-list">
+                  <button v-for="item in upcomingBusinessItems" :key="item.key" type="button" :class="['upcoming-business-item', item.tone, { empty: !item.count }]" :disabled="!item.count" @click="openUpcomingBusiness(item)">
+                    <span class="upcoming-business-icon"><component :is="item.icon" :size="17" stroke-width="2" /></span>
+                    <span class="upcoming-business-content"><b>{{ item.title }}</b><small>{{ item.description }}</small></span>
+                    <span class="upcoming-business-count"><strong>{{ item.count }}</strong><small>{{ item.count ? item.action : '暂无待办' }}</small></span>
                   </button>
-                  <div v-if="index < flowNodes.length - 1" class="flow-node-arrow" :class="node.status"></div>
-                </template>
+                </div>
               </div>
             </div>
 
@@ -3449,10 +4370,6 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               </div>
             </div>
 
-            <div class="sampling-flow-summary label-flow-summary">
-              <div v-for="item in labelFlowSummary" :key="item.label"><span>{{ item.label }}</span><strong>{{ item.value }}</strong></div>
-            </div>
-
             <div class="sampling-filter-bar">
               <input v-model="labelFilter.sampleName" placeholder="样品名称" />
               <select v-model="labelFilter.source">
@@ -3461,15 +4378,26 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 <option>外部扦样</option>
               </select>
               <input v-model="labelFilter.sampleNo" placeholder="样品编号" />
-              <select v-model="labelFilter.labelStatus">
-                <option value="">样品状态</option>
-                <option v-for="status in activeLabelStatuses" :key="status">{{ status }}</option>
+              <select v-model="labelFilter.printStatus">
+                <option value="">打印状态</option>
+                <option>未打印</option>
+                <option>已打印</option>
               </select>
               <button type="button"><Search :size="14" /> 查询</button>
             </div>
 
             <div class="sampling-table-card">
-              <table class="sampling-table destroy-table label-table">
+              <table class="sampling-table label-table">
+                <colgroup>
+                  <col class="label-col-sample-no" />
+                  <col class="label-col-name" />
+                  <col class="label-col-quantity" />
+                  <col class="label-col-representative" />
+                  <col class="label-col-source" />
+                  <col class="label-col-print-status" />
+                  <col class="label-col-received-at" />
+                  <col class="label-col-actions" />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>样品编号</th>
@@ -3477,7 +4405,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     <th>样品数量</th>
                     <th>代表数量</th>
                     <th>样品来源</th>
-                    <th>标签状态</th>
+                    <th>打印状态</th>
                     <th>来样时间</th>
                     <th>操作</th>
                   </tr>
@@ -3489,11 +4417,11 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     <td>{{ sampleCountWithUnit(record) }}</td>
                     <td>{{ record.representativeQuantity ?? '—' }}</td>
                     <td>{{ record.source }}</td>
-                    <td><span class="sampling-status"><PackageCheck :size="12" /> {{ record.labelStatus ?? '待检' }}</span></td>
+                    <td><span :class="['label-print-status', labelPrintStatusText(record) === '已打印' ? 'printed' : 'unprinted']">{{ labelPrintStatusText(record) }}</span></td>
                     <td>{{ record.receiveTime }}</td>
                     <td>
                       <div class="sampling-actions">
-                        <button type="button" @click="openSampleLabelPrint(record.sampleNo)"><Printer :size="13" /> 打印</button>
+                        <button type="button" @click="openSampleLabelPrint(record.sampleNo)"><Printer :size="13" /> {{ labelPrintStatusText(record) === '已打印' ? '再次打印' : '打印' }}</button>
                         <button type="button" @click="deleteSampleLabel(record.sampleNo)"><Trash2 :size="13" /> 删除</button>
                       </div>
                     </td>
@@ -3611,7 +4539,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             <div class="sampling-toolbar">
               <div class="module-title-block">
                 <h2>检验报告管理</h2>
-                <span>已收样样品自动进入检验报告管理，检测状态按样品编号同步流转</span>
+                <span>扫码录入后填写质检结果，审批通过后生成正式质检报告</span>
               </div>
               <div class="approval-role-switch readonly">
                 <span>当前登录用户</span>
@@ -3622,8 +4550,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             <div class="sampling-filter-bar">
               <input v-model="reportFilters.sampleNo" placeholder="样品编号" />
               <input v-model="reportFilters.sampleName" placeholder="样品名称" />
-              <select v-model="reportFilters.labelStatus"><option value="">样品状态</option><option>待检</option><option>在检</option><option>检毕</option><option>留样</option><option>销样</option></select>
-              <select v-model="reportFilters.approvalStatus"><option value="">审批状态</option><option>未提交</option><option>审批中</option><option>审批通过</option><option>退回修改</option></select>
+              <select v-model="reportFilters.processStatus"><option value="">流程状态</option><option>待扫码录入</option><option>待录入结果</option><option>待修改结果</option><option>待提交审批</option><option>审核人审批中</option><option>负责人审批中</option><option>批准人审批中</option><option>质检报告已生成</option><option>审批未通过</option></select>
             </div>
 
             <div class="sampling-table-card">
@@ -3634,8 +4561,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     <th>样品名称</th>
                     <th>样品数量</th>
                     <th>样品来源</th>
-                    <th>样品状态</th>
-                    <th>审批状态</th>
+                    <th>流程状态</th>
                     <th>操作</th>
                   </tr>
                 </thead>
@@ -3645,17 +4571,16 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     <td>{{ record.sampleName }}</td>
                     <td>{{ sampleCountWithUnit(record) }}</td>
                     <td>{{ record.source }}</td>
-                    <td><span class="sampling-status"><Microscope :size="12" /> {{ record.labelStatus ?? '待检' }}</span></td>
-                    <td><span class="sampling-status"><Route :size="12" /> {{ reportApprovalStatusText(record) }}</span></td>
+                    <td><span :class="['report-process-status', reportProcessStatusTone(record)]"><Route :size="13" /> {{ reportProcessStatusText(record) }}</span></td>
                     <td>
                       <div class="sampling-actions">
-                        <button v-if="(record.labelStatus ?? '待检') === '待检'" type="button" @click="startInspection(record.sampleNo)"><Microscope :size="13" /> 开始检测</button>
+                        <button v-if="(record.labelStatus ?? '待检') === '待检'" type="button" @click="openInspectionScanDialog(record.sampleNo)"><Crosshair :size="13" /> 扫码录入</button>
                         <button v-if="canEditReportResult(record)" type="button" @click="openReportForm(record.sampleNo)"><Edit3 :size="13" /> 录入结果</button>
-                        <button v-if="['检毕', '留样', '销样'].includes(String(record.labelStatus))" type="button" @click="openReportView(record.sampleNo)"><Eye :size="13" /> 查看质检报告</button>
+                        <button v-if="record.approvalStep || record.labelStatus === '检毕' || record.approvalStatus === '销样'" type="button" @click="openQualityResultView(record.sampleNo)"><Eye :size="13" /> 查看质检结果</button>
+                        <button v-if="reportHasFormalReport(record)" type="button" @click="openReportView(record.sampleNo)"><BookOpenText :size="13" /> 查看质检报告</button>
                         <button v-if="record.approvalStep" type="button" @click="openApprovalFlow(record.sampleNo)"><Route :size="13" /> 流程图</button>
                         <button v-if="canApproveReport(record)" type="button" @click="approveReport(record.sampleNo, 'pass')"><CheckCircle2 :size="13" /> 同意</button>
-                        <button v-if="canApproveReport(record) && currentLoginUser.role !== '编制人'" type="button" @click="approveReport(record.sampleNo, 'return')"><CornerDownLeft :size="13" /> 退回修改</button>
-                        <button v-if="canApproveReport(record) && currentLoginUser.role === '批准人'" type="button" @click="approveReport(record.sampleNo, 'destroy')"><Trash2 :size="13" /> 销样</button>
+                        <button v-if="canApproveReport(record)" type="button" @click="approveReport(record.sampleNo, 'return')"><CornerDownLeft :size="13" /> 退回修改</button>
                       </div>
                     </td>
                   </tr>
@@ -3668,18 +4593,19 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             <div class="sampling-toolbar">
               <div class="module-title-block">
                 <h2>样品留样管理</h2>
-                <span>批准人同意通过后，样品信息自动进入留样管理</span>
+                <span>扫描样品标签建立留样记录，并通过独立审批流程完成确认</span>
               </div>
+              <button class="primary-action" type="button" @click="openRetainScanDialog"><Crosshair :size="15" /> 扫码新增留样</button>
             </div>
             <div class="sampling-table-card">
               <table class="sampling-table retain-table">
-                <thead><tr><th>报告编号</th><th>样品编号</th><th>样品名称</th><th>仓号</th><th>品种</th><th>样品总数量</th><th>本次留样数量</th><th>留样状态</th><th>留样时间</th><th>过期时间</th><th>到期状态</th><th>操作</th></tr></thead>
+                <thead><tr><th>留样编号</th><th>样品编号</th><th>样品名称</th><th>仓号/货位</th><th>来样日期</th><th>规格</th><th>留样数量</th><th>过期时间</th><th>样品/审批状态</th><th>处理方式</th><th>处置时间</th><th>操作</th></tr></thead>
                 <tbody>
-                  <tr v-for="record in retainRecords" :key="record.sampleNo">
-                    <td>{{ record.reportNo ?? '—' }}</td><td>{{ displaySampleNo(record) }}</td><td>{{ record.sampleName }}</td><td>{{ record.warehouseNo }}</td><td>{{ record.grainType }}</td><td>{{ sampleCountWithUnit(record) }}</td><td>{{ retainCountWithUnit(record) }}</td><td><span :class="['retain-status-badge', retainStatusLevel(record)]"><PackageCheck :size="12" /> {{ retainStatusText(record) }}</span></td><td>{{ record.retainTime ?? ledgerHandleTime(record) }}</td><td>{{ retainExpireDate(record) }}</td><td><span :class="['retain-expire-status', retainStatusLevel(record)]">{{ retainExpireStatus(record) }}</span></td>
-                    <td><div class="sampling-actions"><button type="button" @click="openRetainExpireForm(record)"><Settings :size="13" /> 设置过期时间</button><button type="button" @click="openReportView(record.sampleNo)"><Eye :size="13" /> 查看质检报告</button></div></td>
+                  <tr v-for="record in retainRecords" :key="record.retainRecordId ?? record.sampleNo" :class="{ 'retain-approval-row': canApproveRetain(record) }">
+                    <td>{{ record.retainRecordId ?? '历史留样' }}</td><td>{{ displaySampleNo(record) }}</td><td>{{ record.sampleName }}</td><td><div class="retain-location-cell"><b>{{ record.warehouseNo }}仓</b><span>{{ (record.cargoPosition ?? `${record.warehouseNo}仓1号货位`).replace(`${record.warehouseNo}仓`, '') }}</span></div></td><td>{{ (record.receiveTime ?? record.samplingDate).slice(0, 10) }}</td><td>{{ record.retainSpecification ?? record.packageType ?? '—' }}</td><td>{{ retainCountWithUnit(record) }}</td><td><div :class="['retain-expire-progress', retainStatusLevel(record)]"><div class="retain-expire-progress-meta"><span>{{ retainExpireDate(record) }}</span><b>{{ retainExpireStatus(record) }}</b></div><div class="retain-expire-progress-track" role="progressbar" :aria-valuenow="retainExpireProgress(record)" aria-valuemin="0" aria-valuemax="100"><i :style="{ width: `${retainExpireProgress(record)}%` }"></i></div></div></td><td><div class="retain-state-stack"><span :class="['retain-status-badge', retainLifecycleTone(record)]"><PackageCheck :size="12" /> {{ retainLifecycleStatus(record) }}</span><span :class="['sampling-status', { 'retain-approval-reminder': canApproveRetain(record) }]">{{ canApproveRetain(record) ? `待您审批 · ${retainWorkflowStatusText(record)}` : retainWorkflowStatusText(record) }}</span></div></td><td>{{ record.retainHandlingMethod ?? '留存' }}</td><td>{{ record.retainDisposalTime || '—' }}</td>
+                    <td><div class="sampling-actions retain-row-actions"><button v-if="record.retainRecordId" type="button" @click="openRetainApprovalFlow(record)"><Route :size="13" /> 审批流程</button><button v-if="record.retainApprovalStatus === '退回修改'" type="button" @click="openRetainEditForm(record)"><Edit3 :size="13" /> 修改并送审</button><button v-if="canStartDestroyFromRetain(record)" class="retain-destroy-action" type="button" @click="startDestroyFromRetain(record)"><Trash2 :size="13" /> 销样</button><button v-if="canApproveRetain(record)" class="retain-quick-approve" type="button" @click="approveRetainRecord('pass', record)"><CheckCircle2 :size="13" /> {{ record.retainApprovalStep === '确认留样' ? '确认留样' : '同意' }}</button><button v-if="canApproveRetain(record)" class="retain-quick-reject" type="button" @click="approveRetainRecord('return', record)"><CornerDownLeft :size="13" /> 拒绝</button></div></td>
                   </tr>
-                  <tr v-if="!retainRecords.length"><td colspan="12">暂无留样数据，批准人审批通过后自动生成。</td></tr>
+                  <tr v-if="!retainRecords.length"><td colspan="12">暂无留样数据，请在留样管理中独立登记。</td></tr>
                 </tbody>
               </table>
             </div>
@@ -3689,18 +4615,19 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             <div class="sampling-toolbar">
               <div class="module-title-block">
                 <h2>销样管理</h2>
-                <span>批准人选择销样后，样品信息自动进入销样管理</span>
+                <span>选择已留样样品登记销样申请，并通过独立审批流程完成确认</span>
               </div>
+              <button class="primary-action" type="button" @click="openDestroyForm()"><Plus :size="15" /> 新增销样登记</button>
             </div>
             <div class="sampling-table-card">
               <table class="sampling-table">
-                <thead><tr><th>报告编号</th><th>样品编号</th><th>样品名称</th><th>仓号</th><th>品种</th><th>不合格项</th><th>销样来源</th><th>操作</th></tr></thead>
+                <thead><tr><th>销样编号</th><th>样品编号</th><th>样品名称</th><th>仓号</th><th>货位号</th><th>规格</th><th>品种</th><th>销样来源</th><th>审批状态</th><th>操作</th></tr></thead>
                 <tbody>
-                  <tr v-for="record in destroyRecords" :key="record.sampleNo">
-                    <td>{{ record.reportNo }}</td><td>{{ displaySampleNo(record) }}</td><td>{{ record.sampleName }}</td><td>{{ record.warehouseNo }}</td><td>{{ record.grainType }}</td><td><button class="unqualified-count-btn" type="button" @click="openUnqualifiedItems(record.sampleNo)">{{ reportUnqualifiedCount(record) }} 项</button></td><td>{{ retainStatusLevel(record) === 'expired' ? '留样已过期自动转入' : record.approvalStatus }}</td>
-                    <td><div class="sampling-actions"><button type="button" @click="openReportView(record.sampleNo)"><Eye :size="13" /> 查看质检报告</button></div></td>
+                  <tr v-for="record in destroyRecords" :key="record.destroyRecordId ?? record.sampleNo">
+                    <td>{{ record.destroyRecordId ?? '历史销样' }}</td><td>{{ displaySampleNo(record) }}</td><td>{{ record.sampleName }}</td><td>{{ record.warehouseNo }}仓</td><td>{{ (record.cargoPosition ?? `${record.warehouseNo}仓1号货位`).replace(`${record.warehouseNo}仓`, '') }}</td><td>{{ record.retainSpecification ?? record.packageType ?? record.sampleCount }}</td><td>{{ record.destroyVariety ?? record.grainType }}</td><td>{{ record.destroySource ?? (retainStatusLevel(record) === 'expired' ? '留样已过期自动转入' : '历史销样') }}</td><td><span :class="['sampling-status', { 'retain-approval-reminder': canApproveDestroy(record) }]">{{ canApproveDestroy(record) ? `待您审批 · ${record.destroyApprovalStep}` : record.destroyApprovalStep ? `${record.destroyApprovalStep}审批中` : record.destroyApprovalStatus ?? '历史销样' }}</span></td>
+                    <td><div class="sampling-actions destroy-row-actions"><button v-if="record.destroyRecordId" type="button" @click="openDestroyApprovalFlow(record)"><Route :size="13" /> 销样流程</button><button v-if="record.destroyApprovalStatus === '退回修改'" type="button" @click="openDestroyForm(record)"><Edit3 :size="13" /> 修改并送审</button><button v-if="canApproveDestroy(record)" class="retain-quick-approve" type="button" @click="approveDestroyRecord('pass', record)"><CheckCircle2 :size="13" /> {{ record.destroyApprovalStep === '确认销样' ? '确认销样' : '同意' }}</button><button v-if="canApproveDestroy(record)" class="retain-quick-reject" type="button" @click="approveDestroyRecord('return', record)"><CornerDownLeft :size="13" /> 拒绝</button><button v-if="!record.destroyRecordId" type="button" @click="openQualityResultView(record.sampleNo)"><Eye :size="13" /> 查看质检结果</button></div></td>
                   </tr>
-                  <tr v-if="!destroyRecords.length"><td colspan="8">暂无销样数据。</td></tr>
+                  <tr v-if="!destroyRecords.length"><td colspan="10">暂无销样数据，请先选择已留样样品新增销样登记。</td></tr>
                 </tbody>
               </table>
             </div>
@@ -3751,9 +4678,9 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
 
             <div class="warning-rule-cards">
               <div><b>正常质量检验</b><strong>{{ qualityWarningStats.normal }} 条</strong><span>关键 0 项、普通 0 项</span></div>
-              <div><b>一级预警</b><strong>{{ qualityWarningStats.level1 }} 条</strong><span>普通 1-2 项不合格</span></div>
-              <div><b>二级预警</b><strong>{{ qualityWarningStats.level2 }} 条</strong><span>普通 ≥3 项，或 1 项关键 + 1 项普通</span></div>
-              <div><b>三级预警</b><strong>{{ qualityWarningStats.level3 }} 条</strong><span>关键 ≥2 项，或 1 项关键 + ≥2 项普通</span></div>
+              <div><b>一级预警</b><strong>{{ qualityWarningStats.level1 }} 条</strong><span>关键 ≥2 项，或 1 项关键 + ≥2 项普通</span></div>
+              <div><b>二级预警</b><strong>{{ qualityWarningStats.level2 }} 条</strong><span>普通 ≥3 项，或 1 项关键 + 0-1 项普通</span></div>
+              <div><b>三级预警</b><strong>{{ qualityWarningStats.level3 }} 条</strong><span>普通 1-2 项不合格</span></div>
             </div>
 
             <div class="sampling-table-card warning-record-table-card">
@@ -3776,7 +4703,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 </thead>
                 <tbody>
                   <tr v-for="item in qualityWarningRecords" :key="item.record.sampleNo">
-                    <td><span :class="['warning-level-badge', item.risk.code === 'level3' ? 'alarm' : 'warning']">{{ item.level }}</span></td>
+                    <td><span :class="['warning-level-badge', item.risk.code === 'level1' ? 'alarm' : item.risk.code === 'level2' ? 'warning' : 'level3']">{{ item.level }}</span></td>
                     <td>{{ item.record.reportNo ?? '—' }}</td>
                     <td>{{ displaySampleNo(item.record) }}</td>
                     <td>{{ item.record.sampleName }}</td>
@@ -3787,7 +4714,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     <td><button class="unqualified-count-btn" type="button" @click="openUnqualifiedItems(item.record.sampleNo)">{{ item.count }} 项</button></td>
                     <td><button class="unqualified-detail-link" type="button" @click="openUnqualifiedItems(item.record.sampleNo)">查看不合格项</button></td>
                     <td>{{ item.status }}</td>
-                    <td><div class="sampling-actions"><button type="button" @click="openReportView(item.record.sampleNo)"><Eye :size="13" /> 查看质检报告</button></div></td>
+                    <td><div class="sampling-actions"><button v-if="reportHasFormalReport(item.record)" type="button" @click="openReportView(item.record.sampleNo)"><BookOpenText :size="13" /> 查看质检报告</button><button v-else type="button" @click="openQualityResultView(item.record.sampleNo)"><Eye :size="13" /> 查看质检结果</button></div></td>
                   </tr>
                   <tr v-if="!qualityWarningRecords.length"><td colspan="12">暂无质量预警记录，当前检验报告均为正常质量检验。</td></tr>
                 </tbody>
@@ -4533,8 +5460,8 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
 
             <div class="user-flow-card">
               <h3>审批流转说明</h3>
-              <p>检验报告提交后进入“待编制审批”，只有编制人账号可审批；编制通过后流转至审核人；审核通过后流转至批准人；批准通过后样品状态进入留样。</p>
-              <p>编制人、审核人不通过时退回修改；批准人可选择批准留样或不同意转销样。当前登录用户由登录页账号决定，不允许在审批页面手动切换角色。</p>
+              <p>质检结果提交后依次进入审核人、负责人、批准人审批；全部审批通过后生成正式质检报告。</p>
+              <p>当前节点审批人可以填写审批意见并选择同意或退回修改，意见会保存在历史审批意见中。当前登录用户由登录页账号决定，不允许在审批页面手动切换角色。</p>
             </div>
           </div>
         </section>
@@ -4566,13 +5493,12 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 <label>性质<input v-model="samplingForm.nature" /></label>
                 <label>产地<input v-model="samplingForm.origin" /></label>
                 <label>生产/进口年限<input v-model="samplingForm.productionYear" /></label>
-                <label v-if="samplingSource === 'internal' && samplingReason !== '入库初检'">入仓/罐时间<input v-model="samplingForm.storageDate" /></label>
+                <label v-if="samplingSource === 'internal'">入仓/罐时间<input v-model="samplingForm.storageDate" /></label>
                 <label v-if="samplingSource === 'internal' && samplingReason === '出库检验'">包装/散装<select v-model="samplingForm.packageType"><option>散装</option><option>包装</option></select></label>
                 <label>样品数量<input v-model="samplingForm.sampleCount" /></label>
                 <label>样品单位<select v-model="samplingForm.sampleUnit"><option>kg</option><option>g</option><option>份</option><option>L</option></select></label>
                 <label>{{ samplingSource === 'external' ? '每仓留样份数' : '留样份数' }}<input v-model="samplingForm.retainCount" /></label>
                 <label>{{ samplingSource === 'external' ? '每仓检验样份数' : '检验样份数' }}<input v-model="samplingForm.inspectionCount" /></label>
-                <label>{{ samplingSource === 'external' ? '每仓样品份数' : '样品份数' }}<input v-model="samplingForm.totalCopies" /></label>
                 <label v-if="samplingSource === 'internal'">保管员<input v-model="samplingForm.keeper" /></label>
                 <label>扦样人<input v-model="samplingForm.sampler" /></label>
                 <label>扦样日期<input v-model="samplingForm.samplingDate" type="date" /></label>
@@ -4653,12 +5579,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             <div class="process-dialog-head"><div><h2>样品标签打印</h2><span>{{ selectedLabelRecord.sampleNo }}</span></div><button type="button" @click="showSamplingLabel = false">关闭</button></div>
             <div class="sample-label-preview-wrap">
               <div class="label-status-toolbar">
-                <span>样品状态</span>
-                <label v-for="status in activeLabelStatuses" :key="status">
-                  <input v-model="selectedLabelStatus" type="radio" :value="status" :disabled="!editableLabelStatuses.includes(status)" @change="syncLabelStatus" />
-                  {{ status }}
-                </label>
-                <button type="button" @click="printPage"><Printer :size="14" /> 打印</button>
+                <button type="button" @click="printSampleLabel"><Printer :size="14" /> {{ labelPrintStatusText(selectedLabelRecord) === '已打印' ? '再次打印' : '打印' }}</button>
               </div>
               <div class="print-sample-label">
                 <h2>样品标签</h2>
@@ -4677,15 +5598,38 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                   </div>
                   <img class="qr-code-image" :src="qrCodeImageUrl(displaySampleNo(selectedLabelRecord))" :alt="`样品编号二维码 ${displaySampleNo(selectedLabelRecord)}`" />
                 </div>
-                <div class="label-checks">
-                  <label v-for="status in activeLabelStatuses" :key="status">
-                    <span :class="{ checked: selectedLabelStatus === status }"></span>
-                    {{ status }}
-                  </label>
-                </div>
                 <p>中央储备粮镇江直属库有限公司（承储）</p>
               </div>
             </div>
+          </section>
+        </div>
+
+        <div v-if="showInspectionScanDialog" class="process-dialog-mask" @click.self="showInspectionScanDialog = false">
+          <section class="inspection-scan-dialog">
+            <div class="process-dialog-head"><div><h2>样品扫码录入</h2><span>{{ displaySampleNo(selectedReportRecord) }}</span></div><button type="button" @click="showInspectionScanDialog = false"><X :size="14" /> 关闭</button></div>
+            <div class="inspection-scan-body">
+              <div class="inspection-scan-target">
+                <div><span>待识别样品</span><b>{{ selectedReportRecord.sampleName }}</b></div>
+                <div><span>样品编号</span><b>{{ displaySampleNo(selectedReportRecord) }}</b></div>
+                <div><span>检验事由</span><b>{{ selectedReportRecord.reason }}</b></div>
+              </div>
+              <div class="inspection-scan-workspace">
+                <div class="inspection-scan-frame">
+                  <i class="scan-corner top-left"></i><i class="scan-corner top-right"></i><i class="scan-corner bottom-left"></i><i class="scan-corner bottom-right"></i>
+                  <span class="inspection-scan-line"></span>
+                  <img :src="qrCodeImageUrl(displaySampleNo(selectedReportRecord))" :alt="`样品二维码 ${displaySampleNo(selectedReportRecord)}`" />
+                </div>
+                <button type="button" class="scan-read-button" @click="readInspectionSampleCode"><Crosshair :size="15" /> 读取样品标签</button>
+              </div>
+              <label class="inspection-scan-input">扫码结果<input v-model="inspectionScanValue" placeholder="请扫描或输入样品编号" /></label>
+              <div :class="['inspection-scan-result', inspectionScanValue === displaySampleNo(selectedReportRecord) ? 'matched' : inspectionScanValue ? 'mismatched' : 'pending']">
+                <CheckCircle2 v-if="inspectionScanValue === displaySampleNo(selectedReportRecord)" :size="15" />
+                <TriangleAlert v-else-if="inspectionScanValue" :size="15" />
+                <Clock3 v-else :size="15" />
+                <span>{{ inspectionScanValue === displaySampleNo(selectedReportRecord) ? '样品编号匹配，可以录入' : inspectionScanValue ? '样品编号不匹配，请重新扫描' : '等待读取样品标签' }}</span>
+              </div>
+            </div>
+            <div class="dialog-actions"><button type="button" :disabled="inspectionScanValue !== displaySampleNo(selectedReportRecord)" @click="confirmInspectionScan">确认扫码录入</button><button type="button" @click="showInspectionScanDialog = false">取消</button></div>
           </section>
         </div>
 
@@ -4696,6 +5640,10 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               <button type="button" @click="showReportForm = false">关闭</button>
             </div>
             <div class="report-form-body">
+              <div class="report-auto-entry-toolbar">
+                <div><b>检化验设备数据</b><span>从仪器台账选择设备并自动获取对应检测指标</span></div>
+                <button type="button" @click="openInstrumentDataDialog"><Microscope :size="14" /> 检测数据自动录入</button>
+              </div>
               <section class="report-section">
                 <h3>基础信息</h3>
                 <div class="report-base-grid">
@@ -4710,7 +5658,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                   <label>仓（罐）号<input :value="selectedReportRecord.warehouseNo" readonly /></label>
                   <label>代表数量(吨)<input value="100.000" readonly /></label>
                   <label>产地<input value="江苏" readonly /></label>
-                  <label>质检报告编号<input :value="selectedReportRecord.reportNo ?? '系统提交后生成'" readonly /></label>
+                  <label>质检报告编号<input :value="selectedReportRecord.reportNo ?? '审批通过后生成'" readonly /></label>
                   <label>检验事由<input :value="selectedReportRecord.reason" readonly /></label>
                   <label>记录人<input value="系统记录员" readonly /></label>
                   <label>检测类别<select v-model="reportMetaForm.category"><option>监督检验</option><option>委托检验</option><option>对比检验</option><option>考核检验</option></select></label>
@@ -4730,7 +5678,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                       <td>{{ item.item }}<span v-if="item.isKey" class="warning-level-badge">关键</span></td>
                       <td>{{ item.type }}</td>
                       <td>{{ item.standard }}</td>
-                      <td><input :value="reportResultValue(item.item, 'detectValue')" placeholder="请输入" @input="updateReportResult(item.item, 'detectValue', ($event.target as HTMLInputElement).value)" /></td>
+                      <td><div class="result-detect-cell"><input :value="reportResultValue(item.item, 'detectValue')" placeholder="请输入" @input="updateReportResult(item.item, 'detectValue', ($event.target as HTMLInputElement).value)" /><small v-if="reportResultValue(item.item, 'instrumentName')">{{ reportResultValue(item.item, 'instrumentName') }}</small></div></td>
                       <td><input :value="reportResultValue(item.item, 'judgement')" placeholder="自动判定" readonly /></td>
                       <td><select :value="reportResultValue(item.item, 'inspector') || '质检员A'" @change="updateReportResult(item.item, 'inspector', ($event.target as HTMLSelectElement).value)"><option>质检员A</option><option>张三</option><option>李四</option></select></td>
                     </tr>
@@ -4744,7 +5692,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                   <thead><tr><th>检验项目</th><th>检验依据</th><th>合同要求/检验标准值</th><th>检验值</th><th>单项判定</th><th>检验人</th></tr></thead>
                   <tbody>
                     <tr v-for="item in storageQualityItems" :key="item.item">
-                      <td>{{ item.item }}<span v-if="item.isKey" class="warning-level-badge">关键</span></td><td>{{ item.type }}</td><td>{{ item.standard }}</td><td><input :value="reportResultValue(item.item, 'detectValue')" placeholder="请输入" @input="updateReportResult(item.item, 'detectValue', ($event.target as HTMLInputElement).value)" /></td><td><input :value="reportResultValue(item.item, 'judgement')" placeholder="自动判定" readonly /></td><td><select :value="reportResultValue(item.item, 'inspector') || '质检员A'" @change="updateReportResult(item.item, 'inspector', ($event.target as HTMLSelectElement).value)"><option>质检员A</option><option>张三</option><option>李四</option></select></td>
+                      <td>{{ item.item }}<span v-if="item.isKey" class="warning-level-badge">关键</span></td><td>{{ item.type }}</td><td>{{ item.standard }}</td><td><div class="result-detect-cell"><input :value="reportResultValue(item.item, 'detectValue')" placeholder="请输入" @input="updateReportResult(item.item, 'detectValue', ($event.target as HTMLInputElement).value)" /><small v-if="reportResultValue(item.item, 'instrumentName')">{{ reportResultValue(item.item, 'instrumentName') }}</small></div></td><td><input :value="reportResultValue(item.item, 'judgement')" placeholder="自动判定" readonly /></td><td><select :value="reportResultValue(item.item, 'inspector') || '质检员A'" @change="updateReportResult(item.item, 'inspector', ($event.target as HTMLSelectElement).value)"><option>质检员A</option><option>张三</option><option>李四</option></select></td>
                     </tr>
                   </tbody>
                 </table>
@@ -4756,14 +5704,13 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                   <thead><tr><th>检验项目</th><th>检验依据</th><th>合同要求/检验标准值</th><th>检验值</th><th>单项判定</th><th>检验人</th></tr></thead>
                   <tbody>
                     <tr v-for="item in healthIndicatorItems" :key="item.item">
-                      <td>{{ item.item }}<span v-if="item.isKey" class="warning-level-badge">关键</span></td><td>{{ item.type }}</td><td>{{ item.standard }}</td><td><input :value="reportResultValue(item.item, 'detectValue')" placeholder="请输入" @input="updateReportResult(item.item, 'detectValue', ($event.target as HTMLInputElement).value)" /></td><td><input :value="reportResultValue(item.item, 'judgement')" placeholder="自动判定" readonly /></td><td><select :value="reportResultValue(item.item, 'inspector') || '质检员A'" @change="updateReportResult(item.item, 'inspector', ($event.target as HTMLSelectElement).value)"><option>质检员A</option><option>张三</option><option>李四</option></select></td>
+                      <td>{{ item.item }}<span v-if="item.isKey" class="warning-level-badge">关键</span></td><td>{{ item.type }}</td><td>{{ item.standard }}</td><td><div class="result-detect-cell"><input :value="reportResultValue(item.item, 'detectValue')" placeholder="请输入" @input="updateReportResult(item.item, 'detectValue', ($event.target as HTMLInputElement).value)" /><small v-if="reportResultValue(item.item, 'instrumentName')">{{ reportResultValue(item.item, 'instrumentName') }}</small></div></td><td><input :value="reportResultValue(item.item, 'judgement')" placeholder="自动判定" readonly /></td><td><select :value="reportResultValue(item.item, 'inspector') || '质检员A'" @change="updateReportResult(item.item, 'inspector', ($event.target as HTMLSelectElement).value)"><option>质检员A</option><option>张三</option><option>李四</option></select></td>
                     </tr>
                   </tbody>
                 </table>
                 <div class="health-extra-grid">
-                  <label>等级<select><option>请选择</option><option>一等</option><option>二等</option></select></label>
-                  <label>是否达标<select><option>请选择</option><option>是</option><option>否</option></select></label>
-                  <label class="full">检测结论<textarea placeholder="请输入检测结论"></textarea></label>
+                  <label>质量等级<select v-model="reportMetaForm.qualityGrade"><option value="">请选择</option><option>一等</option><option>二等</option><option>三等</option><option>等外</option><option>不合格</option></select></label>
+                  <label>是否达标<select v-model="reportMetaForm.qualified"><option value="">请选择</option><option value="是">是</option><option value="否">否</option></select></label>
                 </div>
               </section>
             </div>
@@ -4775,19 +5722,59 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
           </section>
         </div>
 
+        <div v-if="showInstrumentDataDialog" class="process-dialog-mask instrument-data-mask" @click.self="showInstrumentDataDialog = false">
+          <section class="instrument-data-dialog">
+            <div class="process-dialog-head"><div><h2>检测数据自动录入</h2><span>{{ displaySampleNo(selectedReportRecord) }} · {{ selectedReportRecord.grainType }} · {{ selectedReportRecord.reason }}</span></div><button type="button" @click="showInstrumentDataDialog = false"><X :size="14" /> 关闭</button></div>
+            <div class="instrument-data-body">
+              <div class="instrument-data-summary">
+                <div><span>设备台账</span><b>{{ labInstruments.length }} 台</b></div>
+                <div><span>已选设备</span><b>{{ selectedInstrumentCodes.length }} 台</b></div>
+                <div><span>可填指标</span><b>{{ selectedInstrumentItemCount }} 项</b></div>
+              </div>
+              <div class="instrument-selection-list">
+                <label v-for="row in instrumentAutoEntryRows" :key="row.instrument.code" :class="['instrument-selection-item', { disabled: !row.selectable, selected: selectedInstrumentCodes.includes(row.instrument.code) }]">
+                  <input v-model="selectedInstrumentCodes" type="checkbox" :value="row.instrument.code" :disabled="!row.selectable" />
+                  <span class="instrument-selection-check"><CheckCircle2 :size="15" /></span>
+                  <div class="instrument-selection-main"><b>{{ row.instrument.name }}</b><span>{{ row.instrument.code }} · {{ row.instrument.model }} · {{ row.instrument.location }}</span><small>{{ row.standards.length ? row.standards.map((item) => item.item).join('、') : '当前检验标准无对应检测指标' }}</small></div>
+                  <span :class="['lab-status', row.instrument.status === '在用' ? 'ok' : row.instrument.status === '弃用' ? 'danger' : 'warn']">{{ row.instrument.status }}</span>
+                </label>
+              </div>
+            </div>
+            <div class="dialog-actions"><span>自动获取的数据仍可在结果表格中人工复核和修改</span><button type="button" :disabled="!selectedInstrumentCodes.length || !selectedInstrumentItemCount" @click="applyInstrumentDetectionData">获取并填充数据</button><button type="button" @click="showInstrumentDataDialog = false">取消</button></div>
+          </section>
+        </div>
+
+        <div v-if="showConfirmDialog" class="process-dialog-mask system-confirm-mask" @click.self="closeConfirmDialog">
+          <section class="system-confirm-dialog" role="alertdialog" aria-modal="true" :aria-labelledby="'system-confirm-title'">
+            <div :class="['system-confirm-icon', { danger: confirmDialog.danger }]">
+              <TriangleAlert v-if="confirmDialog.danger" :size="22" />
+              <CheckCircle2 v-else :size="22" />
+            </div>
+            <div class="system-confirm-content">
+              <h2 id="system-confirm-title">{{ confirmDialog.title }}</h2>
+              <p>{{ confirmDialog.message }}</p>
+            </div>
+            <button class="system-confirm-close" type="button" title="关闭" @click="closeConfirmDialog"><X :size="16" /></button>
+            <div class="system-confirm-actions">
+              <button type="button" @click="closeConfirmDialog">取消</button>
+              <button type="button" :class="{ danger: confirmDialog.danger }" @click="acceptConfirmDialog">{{ confirmDialog.confirmText }}</button>
+            </div>
+          </section>
+        </div>
+
         <div v-if="showReportView" class="process-dialog-mask" @click.self="showReportView = false">
-          <section class="report-form-dialog readonly-report-dialog paper-report-dialog">
-            <div class="process-dialog-head"><div><h2>质检报告详情</h2><span>{{ selectedReportRecord.reportNo ?? '未生成编号' }}</span></div><div class="report-view-actions"><button type="button" @click="printPage"><Printer :size="13" /> 打印</button><button type="button" @click="exportQualityReport"><Download :size="13" /> 导出</button><button type="button" @click="showReportView = false">关闭</button></div></div>
+          <section :class="['report-form-dialog', 'readonly-report-dialog', 'paper-report-dialog', { 'quality-result-dialog': reportViewMode === 'result' }]">
+            <div class="process-dialog-head"><div><h2>{{ reportViewMode === 'report' ? '质检报告详情' : '质检结果详情' }}</h2><span>{{ reportViewMode === 'report' ? selectedReportRecord.reportNo : displaySampleNo(selectedReportRecord) }}</span></div><div class="report-view-actions"><button v-if="reportViewMode === 'report'" type="button" @click="printPage"><Printer :size="13" /> 打印</button><button v-if="reportViewMode === 'report'" type="button" @click="exportQualityReport"><Download :size="13" /> 导出</button><button type="button" @click="showReportView = false">关闭</button></div></div>
             <div class="report-form-body readonly-report-body paper-report-body">
-              <article class="paper-report-page">
+              <article :class="['paper-report-page', { 'quality-result-page': reportViewMode === 'result' }]">
                 <header class="paper-report-header">
                   <div class="paper-report-brand">
                     <img src="/中储粮logo.png" alt="中储粮" />
                     <span>中央储备粮镇江直属库有限公司</span>
                   </div>
-                  <h1>质量检验报告</h1>
+                  <h1>{{ reportViewMode === 'report' ? '质量检验报告' : '质量检验结果' }}</h1>
                   <div class="paper-report-code">
-                    <span>报告编号：{{ selectedReportRecord.reportNo ?? '系统提交后生成' }}</span>
+                    <span>{{ reportViewMode === 'report' ? `报告编号：${selectedReportRecord.reportNo}` : `结果状态：${reportApprovalStatusText(selectedReportRecord)}` }}</span>
                     <span>检测类别：{{ selectedReportRecord.reportMeta?.category ?? '监督检验' }}</span>
                   </div>
                 </header>
@@ -4801,9 +5788,20 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     <tr><th>样品规格</th><td>{{ sampleCountWithUnit(selectedReportRecord) }}</td><th>代表数量</th><td>{{ selectedReportRecord.representativeQuantity ?? '100.000' }} 吨</td></tr>
                     <tr><th>产地</th><td>{{ selectedReportRecord.origin ?? '江苏' }}</td><th>生产年度</th><td>{{ selectedReportRecord.productionYear ?? selectedReportRecord.samplingDate.slice(0, 4) }}</td></tr>
                     <tr><th>送样日期</th><td>{{ selectedReportRecord.sendTime ?? selectedReportRecord.receiveTime ?? '—' }}</td><th>收样日期</th><td>{{ selectedReportRecord.receiveTime ?? '—' }}</td></tr>
-                    <tr><th>报告结论</th><td><span :class="['paper-result-seal', reportConclusionTone(selectedReportRecord)]">{{ reportConclusion(selectedReportRecord) }}</span></td><th>风险分级</th><td>{{ qualityRiskLevel(selectedReportRecord).label }}</td></tr>
+                    <tr v-if="reportViewMode === 'report'"><th>报告结论</th><td><span :class="['paper-result-seal', reportConclusionTone(selectedReportRecord)]">{{ reportConclusion(selectedReportRecord) }}</span></td><th>风险分级</th><td>{{ qualityRiskLevel(selectedReportRecord).label }}</td></tr>
                   </tbody>
                 </table>
+
+                <div class="quality-status-banner" aria-label="质量等级与达标状态">
+                  <div :class="['quality-status-card', 'grade', qualityGradeTone(selectedReportRecord)]">
+                    <span>录入质量等级</span>
+                    <strong>{{ qualityGradeText(selectedReportRecord) }}</strong>
+                  </div>
+                  <div :class="['quality-status-card', 'qualified', qualifiedText(selectedReportRecord) === '是' ? 'pass' : 'fail']">
+                    <span>是否达标</span>
+                    <strong>{{ qualifiedText(selectedReportRecord) }}</strong>
+                  </div>
+                </div>
 
                 <section class="paper-report-section">
                   <h2>一、质量等级指标</h2>
@@ -4859,13 +5857,13 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                   </table>
                 </section>
 
-                <section class="paper-conclusion-box">
+                <section v-if="reportViewMode === 'report'" class="paper-conclusion-box">
                   <h2>检验结论</h2>
                   <p>{{ reportHasUnqualified(selectedReportRecord) ? `该样品检出不合格指标 ${reportUnqualifiedCount(selectedReportRecord)} 项，其中关键指标 ${qualityRiskLevel(selectedReportRecord).keyCount} 项、普通指标 ${qualityRiskLevel(selectedReportRecord).normalCount} 项，综合判定为${qualityRiskLevel(selectedReportRecord).label}。` : '该样品各项检验指标符合质量要求，综合判定为质量合格。' }}</p>
                   <p v-if="selectedReportRecord.reportMeta?.remark">备注：{{ selectedReportRecord.reportMeta.remark }}</p>
                 </section>
 
-                <footer class="paper-report-signatures">
+                <footer v-if="reportViewMode === 'report'" class="paper-report-signatures">
                   <div><span>编制人</span><b>{{ selectedReportRecord.reportMeta?.compiler ?? '王帅' }}</b></div>
                   <div><span>审核人</span><b>{{ selectedReportRecord.reportMeta?.reviewer ?? '李审核' }}</b></div>
                   <div><span>批准人</span><b>{{ selectedReportRecord.reportMeta?.approver ?? '赵批准' }}</b></div>
@@ -4897,17 +5895,21 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 </template>
               </div>
               <section class="approval-history-card">
+                <div class="approval-result-bar">
+                  <span>审批前请核对本次质检结果</span>
+                  <button type="button" @click="openQualityResultView(selectedReportRecord.sampleNo)"><Eye :size="13" /> 查看质检结果</button>
+                </div>
                 <div class="history-mode"><span>历史审批意见</span><label><input type="radio" checked /> 正序</label><label><input type="radio" /> 倒序</label></div>
                 <div class="approval-timeline">
-                  <div v-for="item in [...(selectedReportRecord.approvalHistory ?? [])].reverse()" :key="`${item.title}-${item.time}`" class="approval-timeline-item">
-                    <i></i><b>{{ item.title }}</b><span>{{ item.user }} {{ item.time }}</span>
+                  <div v-for="item in [...reportApprovalHistory(selectedReportRecord)].reverse()" :key="`${item.title}-${item.time}`" class="approval-timeline-item">
+                    <i></i><b>{{ item.title }}</b><span>{{ item.user }} {{ item.time }}</span><small v-if="item.opinion">审批意见：{{ item.opinion }}</small>
                   </div>
                 </div>
                 <div v-if="canApproveReport(selectedReportRecord)" class="approval-actions inline">
                   <div>当前节点：{{ selectedReportRecord.approvalStep }}，当前用户：{{ currentLoginUser.name }}（{{ currentLoginUser.role }}）</div>
+                  <label class="approval-opinion-editor">审批意见<textarea v-model="approvalOpinion" placeholder="请输入本次审批意见（可选）"></textarea></label>
                   <button type="button" @click="approveReport(selectedReportRecord.sampleNo, 'pass')"><CheckCircle2 :size="13" /> 审批通过/同意</button>
-                  <button v-if="currentLoginUser.role !== '编制人'" type="button" @click="approveReport(selectedReportRecord.sampleNo, 'return')"><CornerDownLeft :size="13" /> 不同意退回修改</button>
-                  <button v-if="currentLoginUser.role === '批准人'" type="button" @click="approveReport(selectedReportRecord.sampleNo, 'destroy')"><Trash2 :size="13" /> 不同意转销样</button>
+                  <button type="button" @click="approveReport(selectedReportRecord.sampleNo, 'return')"><CornerDownLeft :size="13" /> 不同意退回修改</button>
                 </div>
                 <div v-else class="approval-tip">当前登录用户无本节点审批权限，仅可查看流程流向与历史审批意见。</div>
               </section>
@@ -4931,7 +5933,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                   <thead><tr><th>序号</th><th>不合格项目</th><th>指标属性</th><th>检测结果</th><th>判定</th><th>处置建议</th></tr></thead>
                   <tbody>
                     <tr v-for="(item, index) in reportUnqualifiedDetails(selectedUnqualifiedRecord)" :key="item.item">
-                      <td>{{ index + 1 }}</td><td class="unqualified-text">{{ item.item }}</td><td><span :class="['indicator-attr-badge', item.isKey ? 'key' : 'normal']">{{ item.isKey ? '关键指标' : '普通指标' }}</span></td><td>{{ item.detectValue }}</td><td><span :class="['warning-level-badge', item.isKey ? 'alarm' : 'warning']">不合格</span></td><td>{{ qualityRiskLevel(selectedUnqualifiedRecord).code === 'level3' ? '进入质量报警处置，建议销样或复检' : '进入质量预警，建议复核检测' }}</td>
+                      <td>{{ index + 1 }}</td><td class="unqualified-text">{{ item.item }}</td><td><span :class="['indicator-attr-badge', item.isKey ? 'key' : 'normal']">{{ item.isKey ? '关键指标' : '普通指标' }}</span></td><td>{{ item.detectValue }}</td><td><span :class="['warning-level-badge', item.isKey ? 'alarm' : 'warning']">不合格</span></td><td>{{ qualityRiskLevel(selectedUnqualifiedRecord).code === 'level1' ? '进入质量报警处置，建议销样或复检' : '进入质量预警，建议复核检测' }}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -4962,14 +5964,136 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
           </section>
         </div>
 
-        <div v-if="showRetainExpireForm" class="process-dialog-mask" @click.self="showRetainExpireForm = false">
-          <section class="send-sample-dialog">
-            <div class="process-dialog-head"><div><h2>过期时间设置</h2><span>{{ retainExpireForm.sampleNo }}</span></div><button type="button" @click="showRetainExpireForm = false">关闭</button></div>
-            <div class="send-form">
-              <label>留样时间<input v-model="retainExpireForm.retainTime" type="date" /></label>
-              <label>保存天数<select v-model.number="retainExpireForm.days"><option v-for="days in retainExpireOptions" :key="days" :value="days">{{ days }}天</option></select></label>
-              <label>过期时间<input :value="retainExpirePreviewDate" readonly /></label>
-              <button type="button" @click="saveRetainExpireDays">保存设置</button>
+        <div v-if="upcomingBusinessDialog && upcomingBusinessRecord" class="process-dialog-mask" @click.self="upcomingBusinessDialog = null">
+          <section class="send-sample-dialog upcoming-action-dialog">
+            <div class="process-dialog-head"><div><h2>{{ upcomingBusinessDialog === 'retain' ? '留样信息核对' : '销样处置信息' }}</h2><span>{{ displaySampleNo(upcomingBusinessRecord) }}</span></div><button type="button" @click="upcomingBusinessDialog = null">关闭</button></div>
+            <div class="detail-sections">
+              <section class="detail-section"><h3>{{ upcomingBusinessDialog === 'retain' ? '留样信息' : '销样信息' }}</h3><div class="detail-grid compact">
+                <div><span>样品名称</span><b>{{ upcomingBusinessRecord.sampleName }}</b></div><div><span>报告编号</span><b>{{ upcomingBusinessRecord.reportNo ?? '未生成' }}</b></div>
+                <div><span>样品数量</span><b>{{ sampleCountWithUnit(upcomingBusinessRecord) }}</b></div><div><span>{{ upcomingBusinessDialog === 'retain' ? '留样数量' : '不合格项' }}</span><b>{{ upcomingBusinessDialog === 'retain' ? retainCountWithUnit(upcomingBusinessRecord) : `${reportUnqualifiedCount(upcomingBusinessRecord)} 项` }}</b></div>
+                <div><span>{{ upcomingBusinessDialog === 'retain' ? '留样时间' : '销样来源' }}</span><b>{{ upcomingBusinessDialog === 'retain' ? (upcomingBusinessRecord.retainTime ?? ledgerHandleTime(upcomingBusinessRecord)) : (retainStatusLevel(upcomingBusinessRecord) === 'expired' ? '留样到期自动转入' : upcomingBusinessRecord.approvalStatus) }}</b></div><div><span>{{ upcomingBusinessDialog === 'retain' ? '到期状态' : '当前状态' }}</span><b>{{ upcomingBusinessDialog === 'retain' ? retainExpireStatus(upcomingBusinessRecord) : '待销样处置' }}</b></div>
+              </div></section>
+            </div>
+            <div class="dialog-actions"><button v-if="upcomingBusinessDialog === 'retain' && upcomingBusinessRecord.retainRecordId" type="button" @click="openRetainApprovalFlow(upcomingBusinessRecord); upcomingBusinessDialog = null">查看审批流程</button><button v-if="upcomingBusinessDialog === 'destroy' && upcomingBusinessRecord.destroyRecordId" type="button" @click="openDestroyApprovalFlow(upcomingBusinessRecord); upcomingBusinessDialog = null">查看销样流程</button><button v-if="upcomingBusinessDialog === 'destroy' && !upcomingBusinessRecord.destroyRecordId && reportHasFormalReport(upcomingBusinessRecord)" type="button" @click="openReportView(upcomingBusinessRecord.sampleNo); upcomingBusinessDialog = null">查看质检报告</button><button v-else-if="upcomingBusinessDialog === 'destroy' && !upcomingBusinessRecord.destroyRecordId" type="button" @click="openQualityResultView(upcomingBusinessRecord.sampleNo); upcomingBusinessDialog = null">查看质检结果</button><button type="button" @click="upcomingBusinessDialog = null">关闭</button></div>
+          </section>
+        </div>
+
+        <div v-if="showDestroyForm" class="process-dialog-mask" @click.self="showDestroyForm = false">
+          <section class="report-form-dialog retain-entry-dialog destroy-entry-dialog">
+            <div class="process-dialog-head"><div><h2>{{ destroyForm.recordId ? '修改销样登记' : '新增销样登记' }}</h2><span>从已留样样品中选择销样对象</span></div><button type="button" @click="showDestroyForm = false"><X :size="14" /> 关闭</button></div>
+            <div class="report-form-body retain-entry-body">
+              <section class="report-section">
+                <h3>选择已留样样品</h3>
+                <div class="report-base-grid retain-entry-grid">
+                  <label class="full">样品编号<select v-model="destroyForm.sourceRetainId" @change="loadDestroySource"><option value="">请选择已留样样品</option><option v-for="record in destroySourceRecords" :key="record.retainRecordId ?? record.sampleNo" :value="record.retainRecordId ?? record.sampleNo">{{ record.sampleNo }} / {{ record.sampleName }}</option></select></label>
+                  <label>样品名称<input v-model="destroyForm.sampleName" readonly /></label>
+                  <label>代表仓号<input :value="`${destroyForm.warehouseNo}仓`" readonly /></label>
+                  <label>代表货位号<input :value="destroyForm.cargoPosition.replace(`${destroyForm.warehouseNo}仓`, '')" readonly /></label>
+                  <label>规格<input v-model="destroyForm.specification" readonly /></label>
+                </div>
+              </section>
+              <section class="report-section">
+                <h3>销样申请信息</h3>
+                <div class="report-base-grid retain-entry-grid">
+                  <label>品种<input v-model="destroyForm.variety" placeholder="请输入品种" /></label>
+                  <label>销样来源<select v-model="destroyForm.destroySource"><option>留样到期</option><option>质量不合格</option><option>复检后处置</option><option>其他</option></select></label>
+                  <label class="full">备注<textarea v-model="destroyForm.remark" placeholder="请输入销样说明"></textarea></label>
+                </div>
+              </section>
+            </div>
+            <div class="dialog-actions"><span>提交后进入审核人、负责人、批准人审批</span><button type="button" :disabled="!destroyForm.sourceRetainId || !destroyForm.variety" @click="saveDestroyForm">提交销样送审</button><button type="button" @click="showDestroyForm = false">取消</button></div>
+          </section>
+        </div>
+
+        <div v-if="showDestroyApprovalFlow && selectedDestroyRecord" class="process-dialog-mask" @click.self="showDestroyApprovalFlow = false">
+          <section class="approval-flow-dialog retain-approval-dialog">
+            <div class="process-dialog-head"><div><h2>销样审批流程</h2><span>{{ selectedDestroyRecord.destroyRecordId }}</span></div><button type="button" @click="showDestroyApprovalFlow = false">关闭</button></div>
+            <div class="approval-flow-body">
+              <div class="approval-flow-summary"><div><span>样品编号</span><b>{{ selectedDestroyRecord.sampleNo }}</b></div><div><span>当前节点</span><b>{{ selectedDestroyRecord.destroyApprovalStep ?? selectedDestroyRecord.destroyApprovalStatus ?? '未送审' }}</b></div><div><span>销样来源</span><b>{{ selectedDestroyRecord.destroySource }}</b></div></div>
+              <div class="approval-route">
+                <template v-for="(item, idx) in destroyApprovalFlowItems(selectedDestroyRecord)" :key="item.name">
+                  <div v-if="idx > 0" :class="['approval-route-arrow', item.state === 'done' ? 'done' : '']"></div>
+                  <div :class="['approval-route-node', item.state]"><span><component :is="item.icon" :size="18" stroke-width="2.2" /></span><b>{{ item.name }}</b><small>{{ item.desc }}</small><em>{{ item.state === 'active' ? '当前节点' : item.state === 'done' ? '已完成' : '未开始' }}</em></div>
+                </template>
+              </div>
+              <section class="approval-history-card">
+                <div class="history-mode"><span>历史审批意见</span></div>
+                <div class="approval-timeline"><div v-for="item in [...(selectedDestroyRecord.destroyApprovalHistory ?? [])].reverse()" :key="`${item.title}-${item.time}`" class="approval-timeline-item"><i></i><b>{{ item.title }}</b><span>{{ item.user }} {{ item.time }}</span><small v-if="item.opinion">审批意见：{{ item.opinion }}</small></div></div>
+                <div v-if="canApproveDestroy(selectedDestroyRecord)" class="approval-actions inline"><div>当前节点：{{ selectedDestroyRecord.destroyApprovalStep }}，当前用户：{{ currentLoginUser.name }}（{{ currentLoginUser.role }}）</div><label class="approval-opinion-editor">审批意见<textarea v-model="destroyApprovalOpinion" placeholder="请输入本次审批意见（可选）"></textarea></label><button type="button" @click="approveDestroyRecord('pass')"><CheckCircle2 :size="13" /> {{ selectedDestroyRecord.destroyApprovalStep === '确认销样' ? '确认销样' : '审批通过/同意' }}</button><button type="button" @click="approveDestroyRecord('return')"><CornerDownLeft :size="13" /> 不同意/退回修改</button></div>
+                <div v-else class="approval-tip">当前登录用户无本节点审批权限，仅可查看销样流程与历史审批意见。</div>
+              </section>
+            </div>
+          </section>
+        </div>
+
+        <div v-if="showRetainScanDialog" class="process-dialog-mask" @click.self="showRetainScanDialog = false">
+          <section class="inspection-scan-dialog retain-scan-dialog">
+            <div class="process-dialog-head"><div><h2>扫码新增留样</h2><span>扫描样品标签获取留样基础信息</span></div><button type="button" @click="showRetainScanDialog = false"><X :size="14" /> 关闭</button></div>
+            <div class="inspection-scan-body">
+              <div class="inspection-scan-target">
+                <div><span>样品编号</span><b>{{ retainScanRecord?.sampleNo ?? '等待扫描' }}</b></div>
+                <div><span>样品名称</span><b>{{ retainScanRecord?.sampleName ?? '—' }}</b></div>
+                <div><span>留样数量</span><b>{{ retainScanRecord ? retainCountWithUnit(retainScanRecord) : '—' }}</b></div>
+              </div>
+              <div class="inspection-scan-workspace">
+                <div class="inspection-scan-frame"><span class="scan-corner top-left"></span><span class="scan-corner top-right"></span><span class="scan-corner bottom-left"></span><span class="scan-corner bottom-right"></span><span class="inspection-scan-line"></span><img :src="qrCodeImageUrl(retainScanValue || 'RETAIN-SCAN')" alt="留样标签二维码" /></div>
+                <button class="scan-read-button" type="button" @click="readRetainSampleCode"><Crosshair :size="14" /> 读取样品标签</button>
+              </div>
+              <label class="inspection-scan-input">标签编码<input v-model="retainScanValue" placeholder="扫描或输入样品编号" /></label>
+              <div :class="['inspection-scan-result', retainScanExistingRecord ? 'mismatched' : retainScanRecord ? 'matched' : retainScanValue ? 'mismatched' : 'pending']"><TriangleAlert v-if="retainScanExistingRecord" :size="14" /><CheckCircle2 v-else-if="retainScanRecord" :size="14" /><TriangleAlert v-else-if="retainScanValue" :size="14" /><Clock3 v-else :size="14" /><span>{{ retainScanExistingRecord ? '该样品已建立留样记录，请勿重复登记' : retainScanRecord ? '标签识别成功，可进入留样登记' : retainScanValue ? '未找到对应样品标签' : '等待读取样品标签' }}</span></div>
+            </div>
+            <div class="dialog-actions"><button type="button" :disabled="!retainScanRecord || Boolean(retainScanExistingRecord)" @click="confirmRetainScan">进入新增录入</button><button type="button" @click="showRetainScanDialog = false">取消</button></div>
+          </section>
+        </div>
+
+        <div v-if="showRetainForm" class="process-dialog-mask" @click.self="showRetainForm = false">
+          <section class="report-form-dialog retain-entry-dialog">
+            <div class="process-dialog-head"><div><h2>{{ retainForm.recordId ? '修改留样登记' : '新增留样登记' }}</h2><span>{{ retainForm.sampleNo }}</span></div><button type="button" @click="showRetainForm = false"><X :size="14" /> 关闭</button></div>
+            <div class="report-form-body retain-entry-body">
+              <section class="report-section">
+                <h3>扫码获取信息</h3>
+                <div class="report-base-grid retain-entry-grid">
+                  <label>样品名称<input v-model="retainForm.sampleName" readonly /></label>
+                  <label>样品编号<input v-model="retainForm.sampleNo" readonly /></label>
+                  <label>来样日期<input v-model="retainForm.sampleDate" readonly /></label>
+                  <label>样品数量<input :value="`${retainForm.sampleCount}${retainForm.sampleUnit}`" readonly /></label>
+                  <label>代表仓号<input :value="`${retainForm.warehouseNo}仓`" readonly /></label>
+                  <label>代表货位号<input :value="retainForm.cargoPosition.replace(`${retainForm.warehouseNo}仓`, '')" readonly /></label>
+                  <label class="full">规格<input v-model="retainForm.specification" readonly /></label>
+                </div>
+              </section>
+              <section class="report-section">
+                <h3>留样处理信息</h3>
+                <div class="report-base-grid retain-entry-grid">
+                  <label>过期时间<input v-model="retainForm.expireAt" type="date" /></label>
+                  <label>样品状态<select v-model="retainForm.sampleStatus"><option>待审批</option><option>正常</option><option>临期</option><option>待处置</option></select></label>
+                  <label>处理方式<select v-model="retainForm.handlingMethod"><option>留存</option><option>到期销毁</option><option>复检备用</option><option>其他</option></select></label>
+                  <label>处置时间<input v-model="retainForm.disposalTime" type="datetime-local" /></label>
+                  <label class="full">备注<textarea v-model="retainForm.remark" placeholder="请输入留样说明"></textarea></label>
+                </div>
+              </section>
+            </div>
+            <div class="dialog-actions"><span>提交后进入审核人、负责人、批准人审批</span><button type="button" :disabled="!retainForm.expireAt" @click="saveRetainForm">提交留样送审</button><button type="button" @click="showRetainForm = false">取消</button></div>
+          </section>
+        </div>
+
+        <div v-if="showRetainApprovalFlow && selectedRetainRecord" class="process-dialog-mask" @click.self="showRetainApprovalFlow = false">
+          <section class="approval-flow-dialog retain-approval-dialog">
+            <div class="process-dialog-head"><div><h2>审批流程</h2><span>{{ selectedRetainRecord.retainRecordId }}</span></div><button type="button" @click="showRetainApprovalFlow = false">关闭</button></div>
+            <div class="approval-flow-body">
+              <div class="approval-flow-summary"><div><span>样品编号</span><b>{{ selectedRetainRecord.sampleNo }}</b></div><div><span>当前节点</span><b>{{ selectedRetainRecord.retainApprovalStep ?? selectedRetainRecord.retainApprovalStatus ?? '未送审' }}</b></div><div><span>留样状态</span><b>{{ retainWorkflowStatusText(selectedRetainRecord) }}</b></div></div>
+              <div class="approval-route">
+                <template v-for="(item, idx) in retainApprovalFlowItems(selectedRetainRecord)" :key="item.name">
+                  <div v-if="idx > 0" :class="['approval-route-arrow', item.state === 'done' ? 'done' : '']"></div>
+                  <div :class="['approval-route-node', item.state]"><span><component :is="item.icon" :size="18" stroke-width="2.2" /></span><b>{{ item.name }}</b><small>{{ item.desc }}</small><em>{{ item.state === 'active' ? '当前节点' : item.state === 'done' ? '已完成' : '未开始' }}</em></div>
+                </template>
+              </div>
+              <section class="approval-history-card">
+                <div class="history-mode"><span>历史审批意见</span></div>
+                <div class="approval-timeline"><div v-for="item in [...(selectedRetainRecord.retainApprovalHistory ?? [])].reverse()" :key="`${item.title}-${item.time}`" class="approval-timeline-item"><i></i><b>{{ item.title }}</b><span>{{ item.user }} {{ item.time }}</span><small v-if="item.opinion">审批意见：{{ item.opinion }}</small></div></div>
+                <div v-if="canApproveRetain(selectedRetainRecord)" class="approval-actions inline"><div>当前节点：{{ selectedRetainRecord.retainApprovalStep }}，当前用户：{{ currentLoginUser.name }}（{{ currentLoginUser.role }}）</div><label class="approval-opinion-editor">审批意见<textarea v-model="retainApprovalOpinion" placeholder="请输入本次审批意见（可选）"></textarea></label><button type="button" @click="approveRetainRecord('pass')"><CheckCircle2 :size="13" /> {{ selectedRetainRecord.retainApprovalStep === '确认留样' ? '确认留样' : '审批通过/同意' }}</button><button type="button" @click="approveRetainRecord('return')"><CornerDownLeft :size="13" /> 不同意/退回修改</button></div>
+                <div v-else class="approval-tip">当前登录用户无本节点审批权限，仅可查看审批流程与历史审批意见。</div>
+              </section>
             </div>
           </section>
         </div>
@@ -4981,7 +6105,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               <label>登录账号<input v-model="userForm.username" :readonly="userFormMode === 'edit'" /></label>
               <label>用户姓名<input v-model="userForm.name" /></label>
               <label>登录密码<input v-model="userForm.password" /></label>
-              <label>审批角色<select v-model="userForm.role"><option>编制人</option><option>审核人</option><option>批准人</option><option>质检员</option></select></label>
+              <label>审批角色<select v-model="userForm.role"><option>编制人</option><option>审核人</option><option>负责人</option><option>批准人</option><option>质检员</option></select></label>
               <label>所属部门<input v-model="userForm.department" /></label>
               <label>联系电话<input v-model="userForm.phone" /></label>
               <label>状态<select v-model="userForm.status"><option>启用</option><option>停用</option></select></label>
