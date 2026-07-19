@@ -110,6 +110,10 @@ interface SamplingRecord {
   destroyVariety?: string
   destroySource?: string
   warehouseMapSample?: boolean
+  samplingApprovalStatus?: '审批中' | '已确认' | '退回修改'
+  samplingApprovalStep?: '送样确认' | '收样确认'
+  samplingApprovalUser?: string
+  samplingApprovalHistory?: ApprovalHistory[]
 }
 
 interface SamplingForm {
@@ -282,6 +286,11 @@ interface ReagentFlowRecord {
   inventoryRecordNo?: string
   stockApplied?: boolean
   inventoryStatus?: '待盘点' | '已盘点'
+  inventoryActualQuantity?: number
+  inventoryResult?: '账实相符' | '存在差异'
+  inventoryConfirmedBy?: string
+  inventoryConfirmedAt?: string
+  inventoryRemark?: string
 }
 
 interface ReagentProcessForm {
@@ -354,6 +363,7 @@ interface PersistedState {
   deletedLabelNos: string[]
   reagentStocks?: ReagentStock[]
   reagentFlowRecords?: ReagentFlowRecord[]
+  reagentCabinets?: ReagentCabinetEnvironment[]
 }
 
 const menuItems: MenuItem[] = [
@@ -389,6 +399,8 @@ const showSamplingPreview = ref(false)
 const showSamplingLabel = ref(false)
 const showSendSample = ref(false)
 const showReceiveSample = ref(false)
+const showSamplingApprovalFlow = ref(false)
+const samplingApprovalOpinion = ref('')
 const showInspectionScanDialog = ref(false)
 const inspectionScanValue = ref('')
 const showReportForm = ref(false)
@@ -450,6 +462,13 @@ const abandonForm = ref({ date: '2026-07-12', handler: '' })
 const showEnvironmentTrendDialog = ref(false)
 
 const showReagentEntryForm = ref(false)
+const showReagentInboundReport = ref(false)
+const selectedReagentInboundRecord = ref<ReagentFlowRecord | null>(null)
+const showReagentInventoryConfirmDialog = ref(false)
+const selectedReagentInventoryRecord = ref<ReagentFlowRecord | null>(null)
+const reagentInventoryConfirmReadOnly = ref(false)
+const reagentInventoryConfirmForm = ref({ actualQuantity: 0, confirmer: '', remark: '' })
+const showReagentCabinetForm = ref(false)
 const showReagentApprovalFlow = ref(false)
 const selectedReagentRecordNo = ref('')
 const reagentProcessTab = ref<ReagentActionType>('入库')
@@ -473,11 +492,13 @@ const reagentFlowForm = ref<ReagentProcessForm>({
 })
 const reagentFlowSourceRecordNo = ref('')
 const selectedReagentCabinetCode = ref('A01')
+const activeReagentCabinetType = ref<ReagentCabinetEnvironment['type']>('普通试剂柜')
 const showReagentCabinetHistory = ref(false)
 const showReagentCabinetTrendDialog = ref(false)
 const activeReagentCabinetRange = ref<EnvironmentRange>('day')
 const activeReagentCabinetFilter = ref('全部试剂柜')
-const activeReagentCabinetAlarmType = ref<EnvironmentAlarmType>('all')
+const reagentCabinetStockKeyword = ref('')
+const reagentCabinetStockStatusFilter = ref<'all' | 'normal' | 'abnormal'>('all')
 const hoveredReagentCabinetPoint = ref<EnvironmentChartPoint | null>(null)
 const reagentEntryForm = ref<ReagentProcessForm>({
   action: '入库',
@@ -494,6 +515,13 @@ const reagentEntryForm = ref<ReagentProcessForm>({
   type: '普通试剂',
   remark: '',
   supplier: '',
+})
+const reagentCabinetForm = ref({
+  code: '',
+  name: '',
+  type: '普通试剂柜' as ReagentCabinetEnvironment['type'],
+  temperature: 22,
+  humidity: 45,
 })
 
 const reportFilters = ref({ sampleNo: '', sampleName: '', processStatus: '' })
@@ -525,7 +553,7 @@ const loginForm = ref({ username: 'wangshuai', password: '123456' })
 const currentLoginUser = ref<SystemUser | null>(null)
 const samplingFormMode = ref<'create' | 'edit'>('create')
 const samplingForm = ref<SamplingForm>({ orderNo: '', sampleNo: '', sampleName: '', sampleCount: '2kg × 4', sampleUnit: 'kg', sampler: '张三', samplingDate: '2026-07-04', reason: '入库验收', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-17', packageType: '散装', retainCount: '1', inspectionCount: '1', keeper: '王保管', remark: '样品用于质量检验流程演示。', cargoPosition: '49仓1号货位', surveyNo: '' })
-const sendSampleForm = ref({ sender: '张三', sendTime: '2026-07-http://localhost:1455/auth/callback?code=ac_y1ze_eM8epyoGjXZtlBbmIutOhHwrc-YAnmGWMFPj0I.28c-z1gY4zNJXvfo3vyaJBINyJbozOkqv3A7TcA3KCc&scope=openid+email+profile+offline_access&state=5e619eceaff9ae282f092744c2da6f5f04T10:30' })
+const sendSampleForm = ref({ sender: '王帅', sendTime: '2026-07-19T10:30' })
 const receiveSampleForm = ref({ receiver: '质检员A', receiveTime: '2026-07-04T11:10' })
 const reportMetaForm = ref<ReportMeta>({ category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '', qualityGrade: '一等', qualified: '是' })
 const userFormMode = ref<'create' | 'edit'>('create')
@@ -2199,14 +2227,20 @@ watch([activeEnvironmentRange, activeEnvironmentArea, activeEnvironmentAlarmType
   hoveredEnvironmentPoint.value = null
 })
 
-const reagentStocks = ref<ReagentStock[]>([
+const reagentStockDefaults: ReagentStock[] = [
   { code: 'SJ-PT-001', name: '无水乙醇', type: '普通试剂', spec: '500ml/瓶', stock: 18, unit: '瓶', threshold: 8, location: '普通试剂柜A01', keeper: '质检员A', status: '库存正常' },
   { code: 'SJ-PT-002', name: '氢氧化钠标准溶液', type: '普通试剂', spec: '0.1mol/L', stock: 6, unit: '瓶', threshold: 8, location: '普通试剂柜A02', keeper: '王帅', status: '库存偏低' },
   { code: 'SJ-PT-003', name: '酚酞指示剂', type: '普通试剂', spec: '25g/瓶', stock: 10, unit: '瓶', threshold: 5, location: '普通试剂柜A03', keeper: '李审核', status: '库存正常' },
+  { code: 'SJ-PT-004', name: '甲基红指示剂', type: '普通试剂', spec: '25g/瓶', stock: 8, unit: '瓶', threshold: 4, location: '普通试剂柜A01', keeper: '王帅', status: '库存正常' },
+  { code: 'SJ-PT-005', name: '石油醚', type: '普通试剂', spec: '500ml/瓶', stock: 12, unit: '瓶', threshold: 6, location: '普通试剂柜A02', keeper: '质检员A', status: '库存正常' },
   { code: 'SJ-YZD-001', name: '盐酸', type: '易制毒试剂', spec: '500ml/瓶', stock: 4, unit: '瓶', threshold: 6, location: '易制毒双人双锁柜B01', keeper: '赵批准 / 质检员A', status: '库存偏低' },
   { code: 'SJ-YZD-002', name: '硫酸', type: '易制毒试剂', spec: '500ml/瓶', stock: 7, unit: '瓶', threshold: 4, location: '易制毒双人双锁柜B02', keeper: '赵批准 / 李审核', status: '重点管控' },
   { code: 'SJ-YZD-003', name: '高锰酸钾', type: '易制毒试剂', spec: '500g/瓶', stock: 3, unit: '瓶', threshold: 5, location: '易制毒双人双锁柜B03', keeper: '赵批准 / 王帅', status: '库存偏低' },
-])
+  { code: 'SJ-YZD-004', name: '丙酮', type: '易制毒试剂', spec: '500ml/瓶', stock: 9, unit: '瓶', threshold: 5, location: '易制毒双人双锁柜B01', keeper: '赵批准 / 李审核', status: '重点管控' },
+  { code: 'SJ-YZD-005', name: '甲苯', type: '易制毒试剂', spec: '500ml/瓶', stock: 6, unit: '瓶', threshold: 4, location: '易制毒双人双锁柜B02', keeper: '赵批准 / 王帅', status: '重点管控' },
+]
+
+const reagentStocks = ref<ReagentStock[]>(reagentStockDefaults.map((item) => ({ ...item })))
 
 const reagentCabinetSampledAt = currentDateTimeText()
 const reagentCabinets = ref<ReagentCabinetEnvironment[]>([
@@ -2244,14 +2278,26 @@ const reagentCabinetStatus = (cabinet: ReagentCabinetEnvironment, temperature: n
 
 const reagentCabinetItems = (cabinet: ReagentCabinetEnvironment | undefined) => cabinet ? reagentStocks.value.filter((item) => item.location.includes(cabinet.code)) : []
 const selectedReagentCabinetItems = computed(() => reagentCabinetItems(selectedReagentCabinet.value))
+const filteredSelectedReagentCabinetItems = computed(() => {
+  const keyword = reagentCabinetStockKeyword.value.trim().toLowerCase()
+  return selectedReagentCabinetItems.value.filter((item) => {
+    const matchesKeyword = !keyword || `${item.code} ${item.name} ${item.spec} ${item.keeper}`.toLowerCase().includes(keyword)
+    const matchesStatus = reagentCabinetStockStatusFilter.value === 'all'
+      || (reagentCabinetStockStatusFilter.value === 'normal' && !reagentCabinetAlert(selectedReagentCabinet.value))
+      || (reagentCabinetStockStatusFilter.value === 'abnormal' && Boolean(reagentCabinetAlert(selectedReagentCabinet.value)))
+    return matchesKeyword && matchesStatus
+  })
+})
 const reagentCabinetAlertCount = computed(() => reagentCabinets.value.filter((cabinet) => reagentCabinetAlert(cabinet)).length)
+const visibleReagentCabinets = computed(() => reagentCabinets.value.filter((cabinet) => cabinet.type === activeReagentCabinetType.value))
+const visibleReagentCabinetRecords = computed(() => reagentCabinetRealtimeRecords.value.filter((record) => reagentCabinetByCode(record.cabinetCode).type === activeReagentCabinetType.value))
 
 const buildReagentCabinetHistory = (): ReagentCabinetRecord[] => {
   const rows: ReagentCabinetRecord[] = []
   const sampleTimes = ['08:00', '12:00', '16:00', '20:00']
   const endDate = new Date(`${formatDateText(new Date())}T00:00:00`)
 
-  for (let offset = 0; offset < 180; offset += 1) {
+  for (let offset = 0; offset < 365; offset += 1) {
     const current = new Date(endDate)
     current.setDate(endDate.getDate() - offset)
     const dateText = localDateText(current)
@@ -2285,7 +2331,19 @@ const buildReagentCabinetHistory = (): ReagentCabinetRecord[] => {
 }
 
 const reagentCabinetRecords = buildReagentCabinetHistory()
-const activeReagentCabinetRangeLabel = computed(() => environmentRanges.find((item) => item.key === activeReagentCabinetRange.value)?.label ?? '当日')
+const reagentCabinetTrendRanges: { key: EnvironmentRange; label: string; points: number }[] = [
+  { key: 'day', label: '当日', points: 8 },
+  { key: 'week', label: '近一周', points: 7 },
+  { key: 'month', label: '近一个月', points: 30 },
+  { key: 'halfYear', label: '近一年', points: 12 },
+]
+const reagentCabinetRangeStartMap: Record<EnvironmentRange, string> = {
+  day: formatDateText(new Date()),
+  week: addDaysText(formatDateText(new Date()), -6),
+  month: addDaysText(formatDateText(new Date()), -29),
+  halfYear: addDaysText(formatDateText(new Date()), -364),
+}
+const activeReagentCabinetRangeLabel = computed(() => reagentCabinetTrendRanges.find((item) => item.key === activeReagentCabinetRange.value)?.label ?? '当日')
 const reagentCabinetRealtimeRecords = computed<ReagentCabinetRecord[]>(() => reagentCabinets.value.map((cabinet) => ({
   time: cabinet.sampledAt,
   cabinetCode: cabinet.code,
@@ -2296,34 +2354,9 @@ const reagentCabinetRealtimeRecords = computed<ReagentCabinetRecord[]>(() => rea
 })))
 
 const reagentCabinetRangeRecords = computed(() => reagentCabinetRecords
-  .filter((item) => item.time.slice(0, 10) >= environmentRangeStartMap[activeReagentCabinetRange.value])
+  .filter((item) => item.time.slice(0, 10) >= reagentCabinetRangeStartMap[activeReagentCabinetRange.value])
   .filter((item) => activeReagentCabinetFilter.value === '全部试剂柜' || item.cabinetCode === activeReagentCabinetFilter.value)
   .sort((a, b) => a.time.localeCompare(b.time)))
-
-const filteredReagentCabinetRecords = computed(() => reagentCabinetRangeRecords.value.filter((item) => {
-  if (activeReagentCabinetAlarmType.value === 'all') return true
-  if (activeReagentCabinetAlarmType.value === 'normal') return item.status === '正常'
-  if (activeReagentCabinetAlarmType.value === 'temperature') return item.status === '温度报警'
-  if (activeReagentCabinetAlarmType.value === 'humidity') return item.status === '湿度报警'
-  return item.status === '温湿度报警'
-}))
-
-const reagentCabinetDisplayRecords = computed(() => {
-  const rows = filteredReagentCabinetRecords.value
-  if (activeReagentCabinetRange.value === 'day') return [...rows].reverse()
-
-  const groupedRows = new Map<string, ReagentCabinetRecord>()
-  rows.forEach((row) => {
-    const key = activeReagentCabinetRange.value === 'halfYear'
-      ? `${row.time.slice(0, 7)}-${row.cabinetCode}`
-      : `${row.time.slice(0, 10)}-${row.cabinetCode}`
-    groupedRows.set(key, row)
-  })
-  return [...groupedRows.values()].reverse()
-})
-
-const reagentCabinetAvgTemperature = computed(() => `${(reagentCabinetRealtimeRecords.value.reduce((total, item) => total + item.temperature, 0) / Math.max(1, reagentCabinetRealtimeRecords.value.length)).toFixed(1)}℃`)
-const reagentCabinetAvgHumidity = computed(() => `${Math.round(reagentCabinetRealtimeRecords.value.reduce((total, item) => total + item.humidity, 0) / Math.max(1, reagentCabinetRealtimeRecords.value.length))}%`)
 
 const reagentCabinetHistoryRows = computed(() => {
   const today = formatDateText(new Date())
@@ -2333,7 +2366,7 @@ const reagentCabinetHistoryRows = computed(() => {
 })
 
 const reagentCabinetChartRows = computed<EnvironmentChartPoint[]>(() => {
-  const activeRange = environmentRanges.find((item) => item.key === activeReagentCabinetRange.value)
+  const activeRange = reagentCabinetTrendRanges.find((item) => item.key === activeReagentCabinetRange.value)
   const maxPoints = activeRange?.points ?? 8
   const groupedRows = new Map<string, ReagentCabinetRecord[]>()
   reagentCabinetRangeRecords.value.forEach((record) => {
@@ -2374,6 +2407,7 @@ const reagentCabinetTemperaturePoints = computed(() => reagentCabinetChartRows.v
 const reagentCabinetHumidityPoints = computed(() => reagentCabinetChartRows.value.map((item) => `${item.x},${item.humidityY}`).join(' '))
 
 const showReagentCabinetAxisLabel = (index: number, total: number) => {
+  if (activeReagentCabinetRange.value === 'halfYear') return index === 0 || index === total - 1 || index % 2 === 0
   if (activeReagentCabinetRange.value !== 'month') return true
   return index === 0 || index === total - 1 || index % 3 === 0
 }
@@ -2390,7 +2424,7 @@ const reagentCabinetTrendAvgHumidity = computed(() => {
   return `${Math.round(rows.reduce((total, item) => total + item.humidity, 0) / rows.length)}%`
 })
 
-watch([activeReagentCabinetRange, activeReagentCabinetFilter, activeReagentCabinetAlarmType], () => {
+watch([activeReagentCabinetRange, activeReagentCabinetFilter], () => {
   hoveredReagentCabinetPoint.value = null
 })
 
@@ -2398,6 +2432,91 @@ const openReagentCabinetHistory = (cabinet: ReagentCabinetEnvironment) => {
   selectedReagentCabinetCode.value = cabinet.code
   hoveredReagentCabinetPoint.value = null
   showReagentCabinetHistory.value = true
+}
+
+const selectReagentCabinet = (cabinet: ReagentCabinetEnvironment) => {
+  activeReagentCabinetType.value = cabinet.type
+  selectedReagentCabinetCode.value = cabinet.code
+  reagentCabinetStockKeyword.value = ''
+  reagentCabinetStockStatusFilter.value = 'all'
+  hoveredReagentCabinetPoint.value = null
+}
+
+const selectReagentCabinetType = (type: ReagentCabinetEnvironment['type']) => {
+  activeReagentCabinetType.value = type
+  const firstCabinet = reagentCabinets.value.find((cabinet) => cabinet.type === type)
+  if (firstCabinet) selectReagentCabinet(firstCabinet)
+}
+
+const openReagentCabinetTrend = (cabinet: ReagentCabinetEnvironment) => {
+  selectReagentCabinet(cabinet)
+  activeReagentCabinetFilter.value = cabinet.code
+  activeReagentCabinetRange.value = 'day'
+  showReagentCabinetTrendDialog.value = true
+}
+
+const reagentEnvironmentStatus = (cabinet: ReagentCabinetEnvironment | undefined) => cabinet && reagentCabinetAlert(cabinet)
+  ? '试剂环境异常'
+  : '试剂环境正常'
+
+const openReagentCabinetForm = () => {
+  reagentCabinetForm.value = {
+    code: '',
+    name: '',
+    type: activeReagentCabinetType.value,
+    temperature: 22,
+    humidity: 45,
+  }
+  showReagentCabinetForm.value = true
+}
+
+const addReagentCabinet = () => {
+  const form = reagentCabinetForm.value
+  const prefix = form.type === '普通试剂柜' ? 'A' : 'B'
+  const typeCount = reagentCabinets.value.filter((cabinet) => cabinet.type === form.type).length
+  let code = form.code.trim().toUpperCase() || `${prefix}${String(typeCount + 1).padStart(2, '0')}`
+  while (reagentCabinets.value.some((cabinet) => cabinet.code === code)) code = `${prefix}${String(Number(code.slice(1)) + 1 || typeCount + 2).padStart(2, '0')}`
+  const cabinet: ReagentCabinetEnvironment = {
+    code,
+    name: form.name.trim() || `${form.type}${code}`,
+    type: form.type,
+    temperature: Number.isFinite(Number(form.temperature)) ? Number(form.temperature) : 22,
+    humidity: Number.isFinite(Number(form.humidity)) ? Number(form.humidity) : 45,
+    sampledAt: currentDateTimeText(),
+  }
+  reagentCabinets.value.push(cabinet)
+  reagentCabinetRecords.push({
+    time: cabinet.sampledAt,
+    cabinetCode: cabinet.code,
+    cabinetName: cabinet.name,
+    temperature: cabinet.temperature,
+    humidity: cabinet.humidity,
+    status: reagentCabinetStatus(cabinet, cabinet.temperature, cabinet.humidity),
+  })
+  selectReagentCabinet(cabinet)
+  showReagentCabinetForm.value = false
+}
+
+const openReagentEntryForCabinet = () => {
+  const cabinet = selectedReagentCabinet.value
+  if (!cabinet) return
+  reagentEntryForm.value = {
+    action: '入库',
+    reagentCode: '',
+    name: '',
+    spec: '',
+    unit: '瓶',
+    quantity: 0,
+    threshold: 5,
+    location: `${cabinet.name} ${cabinet.code}`,
+    keeper: '',
+    handler: '',
+    time: '2026-07-12T09:00',
+    type: cabinet.type === '易制毒双人双锁柜' ? '易制毒试剂' : '普通试剂',
+    remark: '',
+    supplier: '',
+  }
+  showReagentEntryForm.value = true
 }
 
 const reagentFlowRecords = ref<ReagentFlowRecord[]>([
@@ -2534,6 +2653,13 @@ const openInboundFromProcurement = (record: ReagentFlowRecord) => {
   showReagentFlowForm.value = true
 }
 
+const reagentInboundRecordForProcurement = (record: ReagentFlowRecord) => reagentInboundRecords.value.find((item) => item.sourceRecordNo === record.recordNo)
+
+const openReagentInboundReport = (record: ReagentFlowRecord) => {
+  selectedReagentInboundRecord.value = record
+  showReagentInboundReport.value = true
+}
+
 const updateReagentStockStatus = (stock: ReagentStock) => {
   stock.status = stock.stock <= stock.threshold ? '库存偏低' : stock.type === '易制毒试剂' ? '重点管控' : '库存正常'
 }
@@ -2602,13 +2728,34 @@ const saveReagentFlow = () => {
   showReagentFlowForm.value = false
 }
 
-const completeReagentInventory = (recordNo: string) => {
-  const inventoryRecord = reagentInventoryRecords.value.find((item) => item.recordNo === recordNo)
-  if (!inventoryRecord || inventoryRecord.processStatus === '已盘点') return
-  inventoryRecord.processStatus = '已盘点'
-  inventoryRecord.approvalStatus = '已完成'
-  const returnRecord = reagentReturnRecords.value.find((item) => item.recordNo === inventoryRecord.sourceRecordNo)
+const openReagentInventoryConfirm = (record: ReagentFlowRecord, readOnly = false) => {
+  selectedReagentInventoryRecord.value = record
+  reagentInventoryConfirmReadOnly.value = readOnly
+  reagentInventoryConfirmForm.value = {
+    actualQuantity: record.inventoryActualQuantity ?? record.quantity,
+    confirmer: currentLoginUser.value?.name ?? record.handler ?? '',
+    remark: record.inventoryRemark ?? '',
+  }
+  showReagentInventoryConfirmDialog.value = true
+}
+
+const confirmReagentInventory = () => {
+  const record = selectedReagentInventoryRecord.value
+  if (!record) return
+  const actualQuantity = Math.max(0, Number(reagentInventoryConfirmForm.value.actualQuantity) || 0)
+  const result = actualQuantity === record.quantity ? '账实相符' : '存在差异'
+  record.inventoryActualQuantity = actualQuantity
+  record.inventoryResult = result
+  record.inventoryConfirmedBy = reagentInventoryConfirmForm.value.confirmer || currentLoginUser.value?.name || '系统'
+  record.inventoryConfirmedAt = currentDateTimeText()
+  record.inventoryRemark = reagentInventoryConfirmForm.value.remark
+  record.processStatus = '已盘点'
+  record.approvalStatus = '已完成'
+  const returnRecord = reagentReturnRecords.value.find((item) => item.recordNo === record.sourceRecordNo)
   if (returnRecord) returnRecord.inventoryStatus = '已盘点'
+  showReagentInventoryConfirmDialog.value = false
+  selectedReagentInventoryRecord.value = null
+  reagentInventoryConfirmReadOnly.value = false
 }
 
 const reagentProcessStatusText = (record: ReagentFlowRecord) => {
@@ -2899,23 +3046,20 @@ const qualityLevelItems = computed(() => activeQualityStandards(selectedReportRe
 const storageQualityItems = computed(() => activeQualityStandards(selectedReportRecord.value).filter((item) => item.type.includes('储存品质')))
 const healthIndicatorItems = computed(() => activeQualityStandards(selectedReportRecord.value).filter((item) => item.type.includes('卫生指标')))
 const inspectionKpis = computed(() => [
-  { label: '扦样单', value: allSamplingRecords.value.length, tab: 'sampling', icon: ClipboardPenLine },
-  { label: '样品标签', value: labelRecords.value.length, tab: 'label', icon: Printer },
-  { label: '检验报告', value: completedReportRecords.value.length, tab: 'report', icon: ClipboardList },
-  { label: '样品台账', value: ledgerRecords.value.length, tab: 'ledger', icon: BookOpenText },
-  { label: '样品留样', value: retainRecords.value.length, tab: 'retain', icon: PackageCheck },
-  { label: '销样', value: destroyRecords.value.length, tab: 'destroy', icon: Trash2 },
+  { label: '扦样单', value: allSamplingRecords.value.length, tab: 'sampling', icon: ClipboardPenLine, tone: 'blue' },
+  { label: '样品标签', value: labelRecords.value.length, tab: 'label', icon: Printer, tone: 'teal' },
+  { label: '检验报告', value: completedReportRecords.value.length, tab: 'report', icon: ClipboardList, tone: 'violet' },
+  { label: '样品台账', value: ledgerRecords.value.length, tab: 'ledger', icon: BookOpenText, tone: 'amber' },
+  { label: '样品留样', value: retainRecords.value.length, tab: 'retain', icon: PackageCheck, tone: 'green' },
+  { label: '销样', value: destroyRecords.value.length, tab: 'destroy', icon: Trash2, tone: 'red' },
 ])
 
 const upcomingBusinessItems = computed(() => {
-  const records = allSamplingRecords.value
   const items = [
-    { key: 'sampling', title: '扦样单核对', description: '优先核对新近扦样的样品信息', records: records.filter((record) => record.status === '扦样完成' || record.status === '已送样'), icon: ClipboardPenLine, tone: 'blue', action: '查看扦样单' },
-    { key: 'label', title: '样品标签', description: '已收样样品等待标签确认或打印', records: labelRecords.value, icon: Printer, tone: 'teal', action: '查看标签' },
-    { key: 'report', title: '检验报告', description: '已完成检验的样品可查看报告', records: completedReportRecords.value, icon: ClipboardList, tone: 'violet', action: '查看报告' },
-    { key: 'approval', title: '待审批报告', description: '已提交报告等待审批流程处理', records: reportRecords.value.filter((record) => record.labelStatus === '检毕' && Boolean(record.approvalStep)), icon: CheckCircle2, tone: 'orange', action: '查看审批' },
-    { key: 'retain', title: '留样管理', description: '已批准样品需核对留样与到期信息', records: retainRecords.value, icon: PackageCheck, tone: 'green', action: '查看留样' },
-    { key: 'destroy', title: '销样处置', description: '到期或异常样品等待销样处置', records: destroyRecords.value, icon: Trash2, tone: 'red', action: '查看销样' },
+    { key: 'sampling', title: '扦样单审批确认待办', description: '送样或收样信息等待对应用户确认', records: samplingApprovalTodoRecords.value, icon: ClipboardPenLine, tone: 'blue', action: '审批确认' },
+    { key: 'approval', title: '待审批报告审批', description: '检验报告等待当前用户审批', records: currentApprovalTodoRecords.value, icon: CheckCircle2, tone: 'orange', action: '审批报告' },
+    { key: 'retain', title: '留样审批', description: '留样申请等待当前节点审批确认', records: retainRecords.value.filter((record) => canApproveRetain(record)), icon: PackageCheck, tone: 'green', action: '审批留样' },
+    { key: 'destroy', title: '销样审批', description: '销样申请等待当前节点审批确认', records: destroyRecords.value.filter((record) => canApproveDestroy(record)), icon: Trash2, tone: 'red', action: '审批销样' },
   ]
   const total = items.reduce((sum, item) => sum + item.records.length, 0)
   return items.map((item) => ({ ...item, count: item.records.length, percent: total ? Math.round((item.records.length / total) * 100) : 0, record: item.records[0] }))
@@ -2980,12 +3124,10 @@ const openInspectionTab = (tab: string) => {
 const openUpcomingBusiness = (item: { key: string; record?: SamplingRecord }) => {
   const record = item.record
   if (!record) return
-  if (item.key === 'sampling') return openSamplingDetail(record.orderNo)
-  if (item.key === 'label') return openSampleLabelPrint(record.sampleNo)
-  if (item.key === 'report') return openReportView(record.sampleNo)
+  if (item.key === 'sampling') return openSamplingApprovalFlow(record)
   if (item.key === 'approval') return openApprovalFlow(record.sampleNo)
-  upcomingBusinessRecord.value = record
-  upcomingBusinessDialog.value = item.key === 'retain' ? 'retain' : 'destroy'
+  if (item.key === 'retain') return openRetainApprovalFlow(record)
+  if (item.key === 'destroy') return openDestroyApprovalFlow(record)
 }
 
 const openInspectionTodo = (category: InspectionTodoCategory) => {
@@ -3316,7 +3458,11 @@ const loadPersistedState = () => {
     ensureResponsibleAccount()
     if (Array.isArray(state.deletedLabelNos)) deletedLabelNos.value = state.deletedLabelNos
     if (Array.isArray(state.reagentStocks)) reagentStocks.value = state.reagentStocks
+    reagentStockDefaults.forEach((defaultStock) => {
+      if (!reagentStocks.value.some((stock) => stock.code === defaultStock.code)) reagentStocks.value.push({ ...defaultStock })
+    })
     if (Array.isArray(state.reagentFlowRecords)) reagentFlowRecords.value = state.reagentFlowRecords
+    if (Array.isArray(state.reagentCabinets) && state.reagentCabinets.length) reagentCabinets.value = state.reagentCabinets
     ensureReagentUsageDemoRecords()
     ensureQualityWarningTestRecords()
     allSamplingRecords.value.forEach((record) => {
@@ -3342,6 +3488,7 @@ const persistState = () => {
     deletedLabelNos: deletedLabelNos.value,
     reagentStocks: reagentStocks.value,
     reagentFlowRecords: reagentFlowRecords.value,
+    reagentCabinets: reagentCabinets.value,
   }
   localStorage.setItem(storageKey, JSON.stringify(state))
 }
@@ -3365,7 +3512,7 @@ const warehousePositionTimer = window.setInterval(() => {
 
 onUnmounted(() => window.clearInterval(warehousePositionTimer))
 
-watch([internalSamplingRecords, externalSamplingRecords, internalRetainRecords, internalDestroyRecords, systemUsers, deletedLabelNos, reagentStocks, reagentFlowRecords], persistState, { deep: true })
+watch([internalSamplingRecords, externalSamplingRecords, internalRetainRecords, internalDestroyRecords, systemUsers, deletedLabelNos, reagentStocks, reagentFlowRecords, reagentCabinets], persistState, { deep: true })
 watch(selectedWarehouse, () => {
   activeWarehousePositionIndex.value = 0
 })
@@ -3983,23 +4130,30 @@ const deleteSamplingRecord = (orderNo: string) => {
 const openSendSample = (orderNo: string) => {
   selectedSamplingNo.value = orderNo
   const target = findSamplingRecordByOrderNo(orderNo)
-  sendSampleForm.value = { sender: target?.sender ?? '张三', sendTime: (target?.sendTime ?? '2026-07-04 10:30').replace(' ', 'T') }
+  sendSampleForm.value = { sender: target?.sender ?? currentLoginUser.value?.name ?? target?.sampler ?? '王帅', sendTime: (target?.sendTime ?? '2026-07-19 10:30').replace(' ', 'T') }
   showSendSample.value = true
 }
 
 const openReceiveSample = (orderNo: string) => {
   selectedSamplingNo.value = orderNo
   const target = findSamplingRecordByOrderNo(orderNo)
-  receiveSampleForm.value = { receiver: target?.receiver ?? '质检员A', receiveTime: (target?.receiveTime ?? '2026-07-04 11:10').replace(' ', 'T') }
+  receiveSampleForm.value = { receiver: target?.receiver ?? currentLoginUser.value?.name ?? '质检员A', receiveTime: (target?.receiveTime ?? '2026-07-19 11:10').replace(' ', 'T') }
   showReceiveSample.value = true
 }
 
 const confirmSendSample = () => {
   const target = findSamplingRecordByOrderNo(selectedSamplingNo.value)
   if (target) {
-    target.status = '已送样'
+    target.status = '送样确认中'
     target.sender = sendSampleForm.value.sender
     target.sendTime = formatDateTimeValue(sendSampleForm.value.sendTime)
+    target.samplingApprovalStatus = '审批中'
+    target.samplingApprovalStep = '送样确认'
+    target.samplingApprovalUser = sendSampleForm.value.sender
+    target.samplingApprovalHistory = [
+      ...(target.samplingApprovalHistory ?? []),
+      { title: '提交送样确认', user: `${currentLoginUser.value?.name ?? target.sampler}（提交人）`, time: currentDateTimeText() },
+    ]
   }
   showSendSample.value = false
 }
@@ -4007,12 +4161,51 @@ const confirmSendSample = () => {
 const confirmReceiveSample = () => {
   const target = findSamplingRecordByOrderNo(selectedSamplingNo.value)
   if (target) {
-    target.status = '已收样'
-    target.labelStatus = '待检'
+    target.status = '收样确认中'
     target.receiver = receiveSampleForm.value.receiver
     target.receiveTime = formatDateTimeValue(receiveSampleForm.value.receiveTime)
+    target.samplingApprovalStatus = '审批中'
+    target.samplingApprovalStep = '收样确认'
+    target.samplingApprovalUser = receiveSampleForm.value.receiver
+    target.samplingApprovalHistory = [
+      ...(target.samplingApprovalHistory ?? []),
+      { title: '提交收样确认', user: `${currentLoginUser.value?.name ?? receiveSampleForm.value.receiver}（提交人）`, time: currentDateTimeText() },
+    ]
   }
   showReceiveSample.value = false
+}
+
+const canApproveSamplingTransfer = (record?: SamplingRecord) => Boolean(record?.samplingApprovalStep && record.samplingApprovalUser === currentLoginUser.value?.name)
+
+const samplingApprovalTodoRecords = computed(() => allSamplingRecords.value.filter((record) => canApproveSamplingTransfer(record)))
+
+const openSamplingApprovalFlow = (record: SamplingRecord) => {
+  selectedSamplingNo.value = record.orderNo
+  samplingApprovalOpinion.value = ''
+  showSamplingApprovalFlow.value = true
+}
+
+const approveSamplingTransfer = (action: 'pass' | 'return') => {
+  const target = selectedSamplingRecord.value
+  if (!target?.samplingApprovalStep || !canApproveSamplingTransfer(target)) return
+  const step = target.samplingApprovalStep
+  const user = currentLoginUser.value
+  const resultTitle = action === 'pass' ? `${step}：审批通过并确认` : `${step}：退回修改`
+  target.samplingApprovalHistory = [
+    ...(target.samplingApprovalHistory ?? []),
+    { title: resultTitle, user: user ? `${user.name}（确认人）` : '系统', time: currentDateTimeText(), ...(samplingApprovalOpinion.value.trim() ? { opinion: samplingApprovalOpinion.value.trim() } : {}) },
+  ]
+  if (action === 'return') {
+    target.status = step === '送样确认' ? '扦样完成' : '已送样'
+    target.samplingApprovalStatus = '退回修改'
+  } else {
+    target.status = step === '送样确认' ? '已送样' : '已收样'
+    if (step === '收样确认') target.labelStatus = '待检'
+    target.samplingApprovalStatus = '已确认'
+  }
+  target.samplingApprovalStep = undefined
+  target.samplingApprovalUser = undefined
+  showSamplingApprovalFlow.value = false
 }
 
 const closeSamplingForm = () => {
@@ -4625,8 +4818,8 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
 
           <div v-if="inspectionTab === 'overview'" class="inspection-overview">
             <div class="inspection-kpis">
-              <button v-for="item in inspectionKpis" :key="item.label" type="button" @click="openInspectionTab(item.tab)">
-                <span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>可查看 <span aria-hidden="true">→</span></small>
+              <button v-for="item in inspectionKpis" :key="item.label" :class="['inspection-kpi-card', item.tone]" type="button" @click="openInspectionTab(item.tab)">
+                <span class="inspection-kpi-icon"><component :is="item.icon" :size="19" stroke-width="2" /></span><span class="inspection-kpi-content"><span>{{ item.label }}</span><strong>{{ item.value }}</strong></span>
               </button>
             </div>
 
@@ -4658,10 +4851,9 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 </div>
               </div>
               <div class="flow-visual-card">
-                <div class="panel-head"><h2>近期待办</h2><span>审批与送样</span></div>
+                <div class="panel-head"><h2>审批待办</h2><span>当前用户待处理</span></div>
                 <div class="todo-list">
-                  <button v-for="record in currentApprovalTodoRecords" :key="record.sampleNo" type="button" @click="openApprovalFlow(record.sampleNo)"><CheckCircle2 :size="13" /> {{ displaySampleNo(record) }} {{ record.approvalStep }}待审批</button>
-                  <button v-if="!currentApprovalTodoRecords.length" type="button"><CheckCircle2 :size="13" /> 当前用户暂无待审批检验报告</button>
+                  <button v-for="item in upcomingBusinessItems" :key="`todo-${item.key}`" type="button" :disabled="!item.count" @click="openUpcomingBusiness(item)"><component :is="item.icon" :size="14" /><span>{{ item.title }}</span><b>{{ item.count }}</b></button>
                 </div>
               </div>
             </div>
@@ -4685,7 +4877,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               <input v-model="samplingFilter.sampleName" placeholder="样品名称" />
               <select v-model="samplingFilter.reason"><option value="">检验事由</option><option v-for="item in [...internalReasons, ...externalReasons].filter((value, index, array) => array.indexOf(value) === index)" :key="item">{{ item }}</option></select>
               <select v-model="samplingFilter.source"><option value="">样品来源</option><option>内部扦样</option><option>外部扦样</option></select>
-              <select v-model="samplingFilter.status"><option value="">流程状态</option><option>录入中</option><option>扦样完成</option><option>已送样</option><option>已收样</option></select>
+              <select v-model="samplingFilter.status"><option value="">流程状态</option><option>录入中</option><option>扦样完成</option><option>送样确认中</option><option>已送样</option><option>收样确认中</option><option>已收样</option></select>
               <button type="button"><Search :size="14" /> 查询</button>
             </div>
 
@@ -4727,6 +4919,9 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                         <button v-if="record.status === '录入中'" type="button" @click="deleteSamplingRecord(record.orderNo)"><Trash2 :size="13" /> 删除</button>
                         <button v-if="record.status === '扦样完成'" type="button" @click="openSendSample(record.orderNo)"><Send :size="13" /> 送样</button>
                         <button v-if="record.status === '已送样'" type="button" @click="openReceiveSample(record.orderNo)"><PackageCheck :size="13" /> 收样</button>
+                        <button v-if="record.status === '送样确认中' || record.status === '收样确认中'" type="button" @click="openSamplingApprovalFlow(record)"><Route :size="13" /> 审批流程</button>
+                        <button v-if="record.samplingApprovalHistory?.length && !['送样确认中', '收样确认中'].includes(record.status)" type="button" @click="openSamplingApprovalFlow(record)"><Route :size="13" /> 审批流程</button>
+                        <button v-if="canApproveSamplingTransfer(record)" type="button" class="sampling-confirm-action" @click="openSamplingApprovalFlow(record)"><CheckCircle2 :size="13" /> {{ record.samplingApprovalStep === '送样确认' ? '确认送样' : '确认收样' }}</button>
                       </div>
                     </td>
                   </tr>
@@ -5621,7 +5816,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               <div class="lab-stat-grid"><div v-for="item in reagentStats" :key="item.label" :class="['lab-stat-card', item.tone]"><b>{{ item.value }}</b><span>{{ item.label }}</span></div></div>
             </div>
 
-            <div class="sampling-toolbar" style="margin-top:16px">
+            <div class="sampling-toolbar reagent-toolbar">
               <div class="sampling-source-tabs">
                 <button type="button" :class="{ active: reagentTab === 'overview' }" @click="reagentTab = 'overview'">试剂管理总览</button>
                 <button type="button" :class="{ active: reagentTab === 'inventory' }" @click="reagentTab = 'inventory'">试剂库存台账</button>
@@ -5655,20 +5850,22 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             </section>
 
             <section v-else-if="reagentTab === 'cabinets'" class="lab-panel env-panel environment-module reagent-cabinet-module">
-              <div class="lab-panel-head"><div><h3>试剂柜环境监测</h3></div><button type="button" @click="showReagentCabinetTrendDialog = true"><ChartNoAxesCombined :size="14" /> 查看趋势图</button></div>
+              <div class="reagent-cabinet-type-tabs" role="tablist" aria-label="试剂柜类型">
+                <button type="button" role="tab" :aria-selected="activeReagentCabinetType === '普通试剂柜'" :class="{ active: activeReagentCabinetType === '普通试剂柜' }" @click="selectReagentCabinetType('普通试剂柜')"><b>普通试剂柜</b><span>{{ reagentStocks.filter((item) => item.type === '普通试剂').length }} 种试剂</span></button>
+                <button type="button" role="tab" :aria-selected="activeReagentCabinetType === '易制毒双人双锁柜'" :class="['controlled', { active: activeReagentCabinetType === '易制毒双人双锁柜' }]" @click="selectReagentCabinetType('易制毒双人双锁柜')"><b>易制毒试剂柜</b><span>{{ reagentStocks.filter((item) => item.type === '易制毒试剂').length }} 种试剂</span></button>
+                <div class="reagent-cabinet-inline-actions"><button type="button" class="cabinet-add-button" title="新增试剂柜信息" @click="openReagentCabinetForm"><Plus :size="15" /><span>新增试剂柜</span></button><button type="button" class="cabinet-stock-add-button" title="添加柜内试剂" @click="openReagentEntryForCabinet"><Plus :size="15" /><span>添加柜内试剂</span></button></div>
+              </div>
               <section class="environment-live-section reagent-cabinet-live-section">
-                <div class="environment-live-head"><div><i></i><b>实时温湿度</b></div><div class="environment-live-summary"><span>平均温度 <b>{{ reagentCabinetAvgTemperature }}</b></span><span>平均湿度 <b>{{ reagentCabinetAvgHumidity }}</b></span><span>预警柜体 <b>{{ reagentCabinetAlertCount }}</b></span></div></div>
+                <div class="environment-live-head"><div><i></i><b>{{ activeReagentCabinetType === '普通试剂柜' ? '普通试剂柜' : '易制毒试剂柜' }}实时温湿度</b></div><div class="environment-live-summary"><span>柜体数量 <b>{{ visibleReagentCabinets.length }}</b></span><span>温湿度标准 <b>15-25℃ / 30-60%</b></span></div></div>
                 <div class="environment-live-grid reagent-cabinet-live-grid">
-                  <button v-for="item in reagentCabinetRealtimeRecords" :key="item.cabinetCode" type="button" :class="['environment-live-item', 'reagent-cabinet-live-item', { alert: item.status !== '正常' }]" @click="openReagentCabinetHistory(reagentCabinetByCode(item.cabinetCode))"><div><b>{{ item.cabinetName }}</b><span>{{ item.cabinetCode }} · {{ item.time }}</span></div><strong><small>温度</small>{{ item.temperature }}℃</strong><strong><small>湿度</small>{{ item.humidity }}%</strong><em :class="['lab-status', environmentStatusTone(item.status)]">{{ item.status }}</em></button>
+                  <div v-for="item in visibleReagentCabinetRecords" :key="item.cabinetCode" role="button" tabindex="0" :class="['environment-live-item', 'reagent-cabinet-live-item', { alert: item.status !== '正常', selected: selectedReagentCabinetCode === item.cabinetCode }]" @click="selectReagentCabinet(reagentCabinetByCode(item.cabinetCode))" @keydown.enter="selectReagentCabinet(reagentCabinetByCode(item.cabinetCode))"><div class="reagent-cabinet-live-title"><span><b>{{ item.cabinetName }}</b><small>{{ item.cabinetCode }} · {{ item.time }}</small></span><button type="button" title="查看历史温湿度趋势" aria-label="查看历史温湿度趋势" @click.stop="openReagentCabinetTrend(reagentCabinetByCode(item.cabinetCode))"><ChartNoAxesCombined :size="15" /></button></div><strong><small>温度</small>{{ item.temperature }}℃</strong><strong><small>湿度</small>{{ item.humidity }}%</strong><em :class="['lab-status', environmentStatusTone(item.status)]">{{ item.status }}</em></div>
                 </div>
               </section>
-              <div class="environment-detail-toolbar reagent-cabinet-detail-toolbar">
-                <div class="env-range-tabs"><button v-for="range in environmentRanges" :key="range.key" type="button" :class="{ active: activeReagentCabinetRange === range.key }" @click="activeReagentCabinetRange = range.key">{{ range.label }}</button></div>
-                <label>试剂柜<select v-model="activeReagentCabinetFilter"><option>全部试剂柜</option><option v-for="cabinet in reagentCabinets" :key="cabinet.code" :value="cabinet.code">{{ cabinet.name }}</option></select></label>
-                <label>状态<select v-model="activeReagentCabinetAlarmType"><option v-for="item in environmentAlarmTypes" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
-              </div>
-              <div class="environment-detail-head"><div><h4>{{ activeReagentCabinetRangeLabel }}采集明细</h4><span>{{ activeReagentCabinetFilter === '全部试剂柜' ? '全部试剂柜' : reagentCabinets.find((cabinet) => cabinet.code === activeReagentCabinetFilter)?.name }} · {{ environmentAlarmTypes.find((item) => item.key === activeReagentCabinetAlarmType)?.label }}</span></div><b>{{ reagentCabinetDisplayRecords.length }} 条</b></div>
-              <div class="environment-detail-table-wrap reagent-cabinet-detail-table-wrap"><table class="lab-table environment-detail-table reagent-cabinet-detail-table"><colgroup><col class="environment-time-col" /><col class="reagent-cabinet-name-col" /><col class="environment-value-col" /><col class="environment-value-col" /><col class="reagent-cabinet-standard-col" /><col class="environment-status-col" /><col class="reagent-cabinet-action-col" /></colgroup><thead><tr><th>采集时间</th><th>试剂柜</th><th>温度</th><th>湿度</th><th>存放标准</th><th>状态</th><th>柜内试剂</th></tr></thead><tbody><tr v-for="item in reagentCabinetDisplayRecords" :key="`${item.cabinetCode}-${item.time}`"><td>{{ item.time }}</td><td><b>{{ item.cabinetName }}</b><span class="reagent-cabinet-code">{{ item.cabinetCode }}</span></td><td><b>{{ item.temperature }}℃</b></td><td><b>{{ item.humidity }}%</b></td><td>温度 {{ reagentCabinetStorageStandard(reagentCabinetByCode(item.cabinetCode)).temperature }}<br />湿度 {{ reagentCabinetStorageStandard(reagentCabinetByCode(item.cabinetCode)).humidity }}</td><td><span :class="['lab-status', environmentStatusTone(item.status)]">{{ item.status }}</span></td><td><button type="button" class="secondary-link" @click="openReagentCabinetHistory(reagentCabinetByCode(item.cabinetCode))">查看</button></td></tr><tr v-if="!reagentCabinetDisplayRecords.length"><td colspan="7">当前筛选条件下暂无试剂柜温湿度采集记录。</td></tr></tbody></table></div>
+              <section class="reagent-cabinet-inventory-section">
+                <div class="environment-detail-head"><div><h4>{{ selectedReagentCabinet?.name }} · 柜内试剂明细</h4><span>当前 {{ selectedReagentCabinet?.temperature }}℃ / {{ selectedReagentCabinet?.humidity }}%RH · 存放标准 {{ selectedReagentCabinet ? reagentCabinetStorageStandard(selectedReagentCabinet).temperature : '15-25℃' }} / {{ selectedReagentCabinet ? reagentCabinetStorageStandard(selectedReagentCabinet).humidity : '30-60%' }}</span></div><b>{{ selectedReagentCabinetItems.length }} 种</b></div>
+                <div class="reagent-cabinet-stock-filters"><label><Search :size="14" /><input v-model="reagentCabinetStockKeyword" placeholder="搜索试剂编号、名称、规格或保管人" /></label><label>状态<select v-model="reagentCabinetStockStatusFilter"><option value="all">全部试剂</option><option value="normal">试剂环境正常</option><option value="abnormal">试剂环境异常</option></select></label><span>显示 {{ filteredSelectedReagentCabinetItems.length }} / {{ selectedReagentCabinetItems.length }} 种</span></div>
+                <div class="environment-detail-table-wrap reagent-cabinet-inventory-table-wrap"><table class="lab-table reagent-cabinet-inventory-table"><thead><tr><th>试剂编号</th><th>试剂名称</th><th>规格</th><th>当前库存</th><th>预警阈值</th><th>保管人</th><th>存放温度</th><th>存放湿度</th><th>状态</th></tr></thead><tbody><tr v-for="item in filteredSelectedReagentCabinetItems" :key="item.code"><td>{{ item.code }}</td><td><b>{{ item.name }}</b><span :class="['reagent-type', item.type === '易制毒试剂' ? 'danger' : 'normal']">{{ item.type }}</span></td><td>{{ item.spec }}</td><td><b :class="{ 'unqualified-text': item.stock <= item.threshold }">{{ item.stock }}{{ item.unit }}</b></td><td>{{ item.threshold }}{{ item.unit }}</td><td>{{ item.keeper }}</td><td>{{ selectedReagentCabinet ? reagentCabinetStorageStandard(selectedReagentCabinet).temperature : '—' }}</td><td>{{ selectedReagentCabinet ? reagentCabinetStorageStandard(selectedReagentCabinet).humidity : '—' }}</td><td><span :class="['lab-status', selectedReagentCabinet && reagentCabinetAlert(selectedReagentCabinet) ? 'danger' : 'ok']">{{ reagentEnvironmentStatus(selectedReagentCabinet) }}</span></td></tr><tr v-if="!filteredSelectedReagentCabinetItems.length"><td colspan="9">当前筛选条件下暂无试剂。</td></tr></tbody></table></div>
+              </section>
             </section>
 
             <div v-if="reagentTab === 'records'" class="reagent-process-page">
@@ -5678,12 +5875,12 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
 
               <section v-if="reagentProcessTab === '采购'" class="lab-panel">
                 <div class="lab-panel-head"><div><h3>采购申请</h3><span>新增采购信息后进入编制人、审核人、批准人审批</span></div><button type="button" @click="openReagentFlowForm('采购')"><Plus :size="13" /> 新增采购信息</button></div>
-                <div class="reagent-process-table-wrap"><table class="lab-table reagent-flow-table"><thead><tr><th>采购单号</th><th>试剂名称</th><th>数量</th><th>供应商</th><th>预计入库位置</th><th>申请时间</th><th>审批状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in reagentFlowRecords.filter((record) => record.action === '采购')" :key="item.recordNo"><td>{{ item.recordNo }}</td><td>{{ item.reagentName }}</td><td>{{ item.quantity }}{{ item.unit }}</td><td>{{ item.supplier }}</td><td>{{ item.location }}</td><td>{{ item.time }}</td><td><span :class="['lab-status', item.approvalStatus === '审批通过' ? 'ok' : 'warn']">{{ reagentProcessStatusText(item) }}</span></td><td><button type="button" class="reagent-flow-link" @click="openReagentApprovalFlow(item.recordNo)">审批流程</button><button v-if="item.approvalStatus === '审批通过'" type="button" class="reagent-flow-link" @click="openInboundFromProcurement(item)">生成入库单</button></td></tr><tr v-if="!reagentFlowRecords.some((record) => record.action === '采购')"><td colspan="8">暂无采购申请，请新增采购信息。</td></tr></tbody></table></div>
+                <div class="reagent-process-table-wrap"><table class="lab-table reagent-flow-table"><thead><tr><th>采购单号</th><th>试剂名称</th><th>数量</th><th>供应商</th><th>预计入库位置</th><th>申请时间</th><th>审批状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in reagentFlowRecords.filter((record) => record.action === '采购')" :key="item.recordNo"><td>{{ item.recordNo }}</td><td>{{ item.reagentName }}</td><td>{{ item.quantity }}{{ item.unit }}</td><td>{{ item.supplier }}</td><td>{{ item.location }}</td><td>{{ item.time }}</td><td><span :class="['lab-status', item.approvalStatus === '审批通过' ? 'ok' : 'warn']">{{ reagentProcessStatusText(item) }}</span></td><td><button type="button" class="reagent-flow-link" @click="openReagentApprovalFlow(item.recordNo)">审批流程</button><button v-if="item.approvalStatus === '审批通过' && !reagentInboundRecordForProcurement(item)" type="button" class="reagent-flow-link" @click="openInboundFromProcurement(item)">生成入库单</button><button v-else-if="item.approvalStatus === '审批通过' && reagentInboundRecordForProcurement(item)" type="button" class="reagent-flow-link" @click="openReagentInboundReport(reagentInboundRecordForProcurement(item)!)"><Eye :size="13" /> 查看入库单</button></td></tr><tr v-if="!reagentFlowRecords.some((record) => record.action === '采购')"><td colspan="8">暂无采购申请，请新增采购信息。</td></tr></tbody></table></div>
               </section>
 
               <section v-else-if="reagentProcessTab === '入库'" class="lab-panel">
                 <div class="lab-panel-head"><div><h3>入库登记</h3></div><button type="button" @click="openReagentFlowForm('入库')"><Plus :size="13" /> 新增入库</button></div>
-                <div class="reagent-process-table-wrap"><table class="lab-table reagent-flow-table"><thead><tr><th>入库时间</th><th>入库单号</th><th>来源采购单</th><th>试剂名称</th><th>数量</th><th>试剂位置</th><th>经办人</th><th>状态</th></tr></thead><tbody><tr v-for="item in reagentInboundRecords" :key="item.recordNo"><td>{{ item.time }}</td><td>{{ item.recordNo }}</td><td>{{ item.sourceRecordNo ?? '直接入库' }}</td><td>{{ item.reagentName }}</td><td>{{ item.quantity }}{{ item.unit }}</td><td>{{ item.location }}</td><td>{{ item.handler }}</td><td><span class="lab-status ok">已入库</span></td></tr></tbody></table></div>
+                <div class="reagent-process-table-wrap"><table class="lab-table reagent-flow-table"><thead><tr><th>入库时间</th><th>入库单号</th><th>来源采购单</th><th>试剂名称</th><th>数量</th><th>试剂位置</th><th>经办人</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in reagentInboundRecords" :key="item.recordNo"><td>{{ item.time }}</td><td>{{ item.recordNo }}</td><td>{{ item.sourceRecordNo ?? '直接入库' }}</td><td>{{ item.reagentName }}</td><td>{{ item.quantity }}{{ item.unit }}</td><td>{{ item.location }}</td><td>{{ item.handler }}</td><td><span class="lab-status ok">已入库</span></td><td><button type="button" class="reagent-flow-link" @click="openReagentInboundReport(item)"><Eye :size="13" /> 查看入库单</button></td></tr></tbody></table></div>
               </section>
 
               <section v-else-if="reagentProcessTab === '领用'" class="lab-panel">
@@ -5698,7 +5895,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
 
               <section v-else class="lab-panel">
                 <div class="lab-panel-head"><div><h3>归还后盘点</h3><span>归还提交后自动生成盘点记录，无需重复录入试剂信息</span></div></div>
-                <div class="reagent-process-table-wrap"><table class="lab-table reagent-flow-table"><thead><tr><th>盘点单号</th><th>关联归还单</th><th>生成时间</th><th>试剂名称</th><th>归还数量</th><th>试剂位置</th><th>盘点状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in reagentInventoryRecords" :key="item.recordNo"><td>{{ item.recordNo }}</td><td>{{ item.sourceRecordNo }}</td><td>{{ item.time }}</td><td>{{ item.reagentName }}</td><td>{{ item.quantity }}{{ item.unit }}</td><td>{{ item.location }}</td><td><span :class="['lab-status', item.processStatus === '已盘点' ? 'ok' : 'warn']">{{ item.processStatus ?? '待盘点' }}</span></td><td><button v-if="item.processStatus !== '已盘点'" type="button" class="reagent-flow-link" @click="completeReagentInventory(item.recordNo)">完成盘点</button><span v-else class="maintenance-empty">已完成</span></td></tr></tbody></table></div>
+                <div class="reagent-process-table-wrap"><table class="lab-table reagent-flow-table"><thead><tr><th>盘点单号</th><th>关联归还单</th><th>生成时间</th><th>试剂名称</th><th>归还数量</th><th>试剂位置</th><th>盘点状态</th><th>盘点结果</th><th>操作</th></tr></thead><tbody><tr v-for="item in reagentInventoryRecords" :key="item.recordNo"><td>{{ item.recordNo }}</td><td>{{ item.sourceRecordNo }}</td><td>{{ item.time }}</td><td>{{ item.reagentName }}</td><td>{{ item.quantity }}{{ item.unit }}</td><td>{{ item.location }}</td><td><span :class="['lab-status', item.processStatus === '已盘点' ? 'ok' : 'warn']">{{ item.processStatus ?? '待盘点' }}</span></td><td>{{ item.inventoryResult ?? '待确认' }}<small v-if="item.inventoryActualQuantity !== undefined"> / 实盘 {{ item.inventoryActualQuantity }}{{ item.unit }}</small></td><td><button v-if="item.processStatus !== '已盘点'" type="button" class="reagent-flow-link" @click="openReagentInventoryConfirm(item)"><CheckCircle2 :size="13" /> 确认盘点</button><button v-else type="button" class="reagent-flow-link" @click="openReagentInventoryConfirm(item, true)"><Eye :size="13" /> 查看盘点单</button></td></tr></tbody></table></div>
               </section>
             </div>
           </div>
@@ -5717,6 +5914,39 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 <label>保管人<input v-model="reagentEntryForm.keeper" placeholder="如：质检员A" /></label>
                 <label>类别<select v-model="reagentEntryForm.type"><option>普通试剂</option><option>易制毒试剂</option></select></label>
                 <button type="button" @click="addReagentLedger">确认新增</button>
+              </div>
+            </section>
+          </div>
+
+          <div v-if="showReagentInboundReport && selectedReagentInboundRecord" class="process-dialog-mask" @click.self="showReagentInboundReport = false">
+            <section class="reagent-inbound-report-dialog">
+              <div class="process-dialog-head"><div><h2>试剂入库单</h2><span>{{ selectedReagentInboundRecord.recordNo }} · {{ selectedReagentInboundRecord.sourceRecordNo ? `来源采购单 ${selectedReagentInboundRecord.sourceRecordNo}` : '直接入库' }}</span></div><button type="button" @click="showReagentInboundReport = false"><X :size="13" /> 关闭</button></div>
+              <article class="reagent-inbound-report-body">
+                <header><div><span>检化验试剂管理</span><h1>试剂入库单</h1></div><div class="reagent-inbound-report-code"><b>{{ selectedReagentInboundRecord.recordNo }}</b><small>{{ selectedReagentInboundRecord.time }}</small></div></header>
+                <div class="reagent-inbound-report-meta"><div><span>试剂名称</span><b>{{ selectedReagentInboundRecord.reagentName }}</b></div><div><span>试剂编号</span><b>{{ selectedReagentInboundRecord.reagentCode }}</b></div><div><span>入库数量</span><b>{{ selectedReagentInboundRecord.quantity }}{{ selectedReagentInboundRecord.unit }}</b></div><div><span>入库位置</span><b>{{ selectedReagentInboundRecord.location }}</b></div><div><span>经办人</span><b>{{ selectedReagentInboundRecord.handler }}</b></div><div><span>入库状态</span><b class="reagent-report-ok">已入库</b></div></div>
+                <section><h3>入库信息</h3><table><tbody><tr><th>来源采购单</th><td>{{ selectedReagentInboundRecord.sourceRecordNo ?? '直接入库' }}</td><th>规格</th><td>{{ reagentStocks.find((item) => item.code === selectedReagentInboundRecord.reagentCode)?.spec ?? '—' }}</td></tr><tr><th>业务说明</th><td colspan="3">{{ selectedReagentInboundRecord.remark || '无' }}</td></tr></tbody></table></section>
+                <footer><span>编制人：{{ selectedReagentInboundRecord.handler || '系统' }}</span><span>入库确认：{{ selectedReagentInboundRecord.time }}</span></footer>
+              </article>
+            </section>
+          </div>
+
+          <div v-if="showReagentInventoryConfirmDialog && selectedReagentInventoryRecord" class="process-dialog-mask" @click.self="showReagentInventoryConfirmDialog = false">
+            <section class="reagent-inventory-confirm-dialog">
+              <div class="process-dialog-head"><div><h2>{{ reagentInventoryConfirmReadOnly ? '盘点单详情' : '确认盘点信息' }}</h2><span>{{ selectedReagentInventoryRecord.recordNo }} · {{ reagentInventoryConfirmReadOnly ? '已确认盘点记录' : '请核对账面数量与实盘数量' }}</span></div><button type="button" @click="showReagentInventoryConfirmDialog = false; reagentInventoryConfirmReadOnly = false"><X :size="13" /> 关闭</button></div>
+              <div class="reagent-inventory-confirm-body"><div class="reagent-inventory-confirm-summary"><div><span>试剂名称</span><b>{{ selectedReagentInventoryRecord.reagentName }}</b></div><div><span>存放位置</span><b>{{ selectedReagentInventoryRecord.location }}</b></div><div><span>账面数量</span><b>{{ selectedReagentInventoryRecord.quantity }}{{ selectedReagentInventoryRecord.unit }}</b></div><div><span>关联归还单</span><b>{{ selectedReagentInventoryRecord.sourceRecordNo ?? '—' }}</b></div></div><div class="reagent-inventory-confirm-form"><label>实盘数量<input v-model.number="reagentInventoryConfirmForm.actualQuantity" :readonly="reagentInventoryConfirmReadOnly" type="number" min="0" step="0.1" /></label><label>盘点结果<input :value="selectedReagentInventoryRecord.inventoryResult ?? (Number(reagentInventoryConfirmForm.actualQuantity) === selectedReagentInventoryRecord.quantity ? '账实相符' : '存在差异')" readonly /></label><label>确认人<input v-model="reagentInventoryConfirmForm.confirmer" :readonly="reagentInventoryConfirmReadOnly" placeholder="请输入确认人" /></label><label class="full">盘点备注<textarea v-model="reagentInventoryConfirmForm.remark" :readonly="reagentInventoryConfirmReadOnly" placeholder="可填写封签、包装、数量差异等盘点说明"></textarea></label></div><button v-if="!reagentInventoryConfirmReadOnly" type="button" class="reagent-inventory-confirm-button" @click="confirmReagentInventory"><CheckCircle2 :size="15" /> 确认盘点并完成</button><div v-else class="reagent-inventory-confirmed-tip"><CheckCircle2 :size="15" /> 已由 {{ selectedReagentInventoryRecord.inventoryConfirmedBy || '系统' }} 于 {{ selectedReagentInventoryRecord.inventoryConfirmedAt || selectedReagentInventoryRecord.time }} 确认</div></div>
+            </section>
+          </div>
+
+          <div v-if="showReagentCabinetForm" class="process-dialog-mask" @click.self="showReagentCabinetForm = false">
+            <section class="send-sample-dialog reagent-cabinet-form-dialog">
+              <div class="process-dialog-head"><div><h2>新增试剂柜信息</h2><span>登记柜体类型、编号及当前环境参数</span></div><button type="button" @click="showReagentCabinetForm = false"><X :size="12" /> 关闭</button></div>
+              <div class="send-form">
+                <label>试剂柜类型<select v-model="reagentCabinetForm.type"><option value="普通试剂柜">普通试剂柜</option><option value="易制毒双人双锁柜">易制毒双人双锁柜</option></select></label>
+                <label>试剂柜编号<input v-model="reagentCabinetForm.code" placeholder="留空自动生成，如 A04" /></label>
+                <label class="full">试剂柜名称<input v-model="reagentCabinetForm.name" placeholder="留空按类型和编号自动生成" /></label>
+                <label>当前温度（℃）<input v-model.number="reagentCabinetForm.temperature" type="number" min="-20" max="60" step="0.1" /></label>
+                <label>当前湿度（%RH）<input v-model.number="reagentCabinetForm.humidity" type="number" min="0" max="100" /></label>
+                <button type="button" @click="addReagentCabinet"><Plus :size="14" /> 确认新增试剂柜</button>
               </div>
             </section>
           </div>
@@ -5776,7 +6006,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               <div class="reagent-cabinet-history-body">
                 <div class="cabinet-history-summary"><div><span>当前温度</span><b>{{ selectedReagentCabinet?.temperature }}℃</b></div><div><span>当前湿度</span><b>{{ selectedReagentCabinet?.humidity }}%</b></div><div><span>最近采集</span><b>{{ selectedReagentCabinet?.sampledAt }}</b></div></div>
                 <div v-if="selectedReagentCabinet" :class="['reagent-cabinet-standard-banner', { alert: Boolean(reagentCabinetAlert(selectedReagentCabinet)) }]"><div><b>{{ reagentCabinetAlert(selectedReagentCabinet) || '当前柜体环境符合存放标准' }}</b><span>温度标准 {{ reagentCabinetStorageStandard(selectedReagentCabinet).temperature }} · 湿度标准 {{ reagentCabinetStorageStandard(selectedReagentCabinet).humidity }}</span></div></div>
-                <section class="reagent-cabinet-stock-section"><div class="section-subhead"><div><h4>柜内试剂</h4><span>库存台账与存放标准</span></div><span>{{ selectedReagentCabinetItems.length }} 种</span></div><div class="reagent-cabinet-stock-table-wrap"><table class="lab-table"><thead><tr><th>试剂编号</th><th>试剂名称</th><th>规格</th><th>库存</th><th>存放温度</th><th>存放湿度</th><th>当前状态</th></tr></thead><tbody><tr v-for="item in selectedReagentCabinetItems" :key="item.code"><td>{{ item.code }}</td><td>{{ item.name }}</td><td>{{ item.spec }}</td><td>{{ item.stock }}{{ item.unit }}</td><td>{{ selectedReagentCabinet ? reagentCabinetStorageStandard(selectedReagentCabinet).temperature : '—' }}</td><td>{{ selectedReagentCabinet ? reagentCabinetStorageStandard(selectedReagentCabinet).humidity : '—' }}</td><td><span :class="['lab-status', selectedReagentCabinet && reagentCabinetAlert(selectedReagentCabinet) ? 'danger' : 'ok']">{{ selectedReagentCabinet && reagentCabinetAlert(selectedReagentCabinet) ? '环境不符合' : '符合标准' }}</span></td></tr><tr v-if="!selectedReagentCabinetItems.length"><td colspan="7">该试剂柜暂无关联试剂。</td></tr></tbody></table></div></section>
+                <section class="reagent-cabinet-stock-section"><div class="section-subhead"><div><h4>柜内试剂</h4><span>库存台账与存放标准</span></div><span>{{ selectedReagentCabinetItems.length }} 种</span></div><div class="reagent-cabinet-stock-table-wrap"><table class="lab-table"><thead><tr><th>试剂编号</th><th>试剂名称</th><th>规格</th><th>库存</th><th>存放温度</th><th>存放湿度</th><th>当前状态</th></tr></thead><tbody><tr v-for="item in selectedReagentCabinetItems" :key="item.code"><td>{{ item.code }}</td><td>{{ item.name }}</td><td>{{ item.spec }}</td><td>{{ item.stock }}{{ item.unit }}</td><td>{{ selectedReagentCabinet ? reagentCabinetStorageStandard(selectedReagentCabinet).temperature : '—' }}</td><td>{{ selectedReagentCabinet ? reagentCabinetStorageStandard(selectedReagentCabinet).humidity : '—' }}</td><td><span :class="['lab-status', selectedReagentCabinet && reagentCabinetAlert(selectedReagentCabinet) ? 'danger' : 'ok']">{{ reagentEnvironmentStatus(selectedReagentCabinet) }}</span></td></tr><tr v-if="!selectedReagentCabinetItems.length"><td colspan="7">该试剂柜暂无关联试剂。</td></tr></tbody></table></div></section>
                 <div class="cabinet-history-table-wrap"><table class="lab-table"><thead><tr><th>采集时间</th><th>柜内温度</th><th>柜内湿度</th></tr></thead><tbody><tr v-for="item in reagentCabinetHistoryRows" :key="item.time"><td>{{ item.time }}</td><td>{{ item.temperature }}℃</td><td>{{ item.humidity }}%</td></tr></tbody></table></div>
               </div>
             </section>
@@ -5786,7 +6016,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             <section class="environment-trend-dialog">
               <div class="process-dialog-head"><div><h2>试剂柜温湿度趋势</h2><span>{{ activeReagentCabinetRangeLabel }} · {{ activeReagentCabinetFilter === '全部试剂柜' ? '全部试剂柜' : reagentCabinetByCode(activeReagentCabinetFilter).name }}</span></div><button type="button" @click="showReagentCabinetTrendDialog = false"><X :size="14" /> 关闭</button></div>
               <div class="environment-trend-dialog-body">
-                <div class="environment-trend-toolbar"><div class="env-range-tabs"><button v-for="range in environmentRanges" :key="range.key" type="button" :class="{ active: activeReagentCabinetRange === range.key }" @click="activeReagentCabinetRange = range.key">{{ range.label }}</button></div><label>试剂柜<select v-model="activeReagentCabinetFilter"><option>全部试剂柜</option><option v-for="cabinet in reagentCabinets" :key="cabinet.code" :value="cabinet.code">{{ cabinet.name }}</option></select></label></div>
+                <div class="environment-trend-toolbar"><div class="env-range-tabs"><button v-for="range in reagentCabinetTrendRanges" :key="range.key" type="button" :class="{ active: activeReagentCabinetRange === range.key }" @click="activeReagentCabinetRange = range.key">{{ range.label }}</button></div><label>当前柜体 <b>{{ reagentCabinetByCode(activeReagentCabinetFilter).name }}</b></label></div>
                 <div class="environment-trend-summary"><span>统计维度 <b>{{ activeReagentCabinetRangeLabel }}</b></span><span>平均温度 <b>{{ reagentCabinetTrendAvgTemperature }}</b></span><span>平均湿度 <b>{{ reagentCabinetTrendAvgHumidity }}</b></span></div>
                 <div class="env-trend-chart environment-popup-chart">
                   <div class="chart-legend"><span class="temp">温度</span><span class="humidity">湿度</span></div>
@@ -6370,9 +6600,9 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
           <section class="send-sample-dialog">
             <div class="process-dialog-head"><div><h2>送样登记</h2><span>{{ selectedSamplingRecord.orderNo }}</span></div><button type="button" @click="showSendSample = false">关闭</button></div>
             <div class="send-form">
-              <label>送样人名称<input v-model="sendSampleForm.sender" /></label>
+              <label>送样确认用户<select v-model="sendSampleForm.sender"><option v-for="user in systemUsers.filter((item) => item.status === '启用')" :key="user.username" :value="user.name">{{ user.name }}（{{ user.role }}）</option></select></label>
               <label>送样时间<input v-model="sendSampleForm.sendTime" type="datetime-local" /></label>
-              <button type="button" @click="confirmSendSample">确认送样</button>
+              <button type="button" @click="confirmSendSample">提交送样确认</button>
             </div>
           </section>
         </div>
@@ -6381,9 +6611,21 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
           <section class="send-sample-dialog">
             <div class="process-dialog-head"><div><h2>收样登记</h2><span>{{ selectedSamplingRecord.orderNo }}</span></div><button type="button" @click="showReceiveSample = false">关闭</button></div>
             <div class="send-form">
-              <label>收样人名称<input v-model="receiveSampleForm.receiver" /></label>
+              <label>收样确认用户<select v-model="receiveSampleForm.receiver"><option v-for="user in systemUsers.filter((item) => item.status === '启用')" :key="user.username" :value="user.name">{{ user.name }}（{{ user.role }}）</option></select></label>
               <label>收样时间<input v-model="receiveSampleForm.receiveTime" type="datetime-local" /></label>
-              <button type="button" @click="confirmReceiveSample">确认收样</button>
+              <button type="button" @click="confirmReceiveSample">提交收样确认</button>
+            </div>
+          </section>
+        </div>
+
+        <div v-if="showSamplingApprovalFlow && selectedSamplingRecord" class="process-dialog-mask" @click.self="showSamplingApprovalFlow = false">
+          <section class="sampling-approval-dialog">
+            <div class="process-dialog-head"><div><h2>扦样单送收样审批流</h2><span>{{ selectedSamplingRecord.orderNo }} · {{ selectedSamplingRecord.samplingApprovalStep ?? selectedSamplingRecord.samplingApprovalStatus ?? '已完成' }}</span></div><button type="button" @click="showSamplingApprovalFlow = false"><X :size="13" /> 关闭</button></div>
+            <div class="sampling-approval-body">
+              <div class="sampling-approval-summary"><div><span>样品名称</span><b>{{ selectedSamplingRecord.sampleName }}</b></div><div><span>当前环节</span><b>{{ selectedSamplingRecord.samplingApprovalStep ?? '流程已确认' }}</b></div><div><span>确认用户</span><b>{{ selectedSamplingRecord.samplingApprovalUser ?? selectedSamplingRecord.receiver ?? selectedSamplingRecord.sender ?? '—' }}</b></div><div><span>当前状态</span><b>{{ selectedSamplingRecord.status }}</b></div></div>
+              <div class="sampling-approval-route"><div class="done"><Send :size="16" /><span>提交申请</span></div><i></i><div :class="{ active: selectedSamplingRecord.samplingApprovalStep, done: selectedSamplingRecord.samplingApprovalStatus === '已确认' }"><CheckCircle2 :size="16" /><span>对应用户确认</span></div><i></i><div :class="{ done: selectedSamplingRecord.samplingApprovalStatus === '已确认' }"><PackageCheck :size="16" /><span>状态流转完成</span></div></div>
+              <div class="sampling-approval-history"><h3>审批记录</h3><div v-for="item in selectedSamplingRecord.samplingApprovalHistory ?? []" :key="`${item.title}-${item.time}`"><b>{{ item.title }}</b><span>{{ item.user }} · {{ item.time }}</span><p v-if="item.opinion">{{ item.opinion }}</p></div><div v-if="!selectedSamplingRecord.samplingApprovalHistory?.length"><span>暂无审批记录</span></div></div>
+              <div v-if="canApproveSamplingTransfer(selectedSamplingRecord)" class="sampling-approval-actions"><label>审批意见<textarea v-model="samplingApprovalOpinion" placeholder="可填写确认说明或退回原因"></textarea></label><div><button type="button" class="return" @click="approveSamplingTransfer('return')"><CornerDownLeft :size="13" /> 退回修改</button><button type="button" class="pass" @click="approveSamplingTransfer('pass')"><CheckCircle2 :size="13" /> 审批并确认</button></div></div><div v-else-if="selectedSamplingRecord.samplingApprovalStep" class="sampling-approval-waiting">当前节点由 {{ selectedSamplingRecord.samplingApprovalUser }} 确认，当前用户仅可查看审批进度。</div>
             </div>
           </section>
         </div>
