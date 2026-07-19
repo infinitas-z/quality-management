@@ -4,6 +4,7 @@ import {
   BookOpenText,
   Boxes,
   BriefcaseBusiness,
+  ChartNoAxesCombined,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -11,12 +12,14 @@ import {
   Copy,
   CornerDownLeft,
   Crosshair,
+  Droplets,
   Download,
   ClipboardList,
   ClipboardPenLine,
   Clock3,
   Edit3,
   Eye,
+  FlaskConical,
   Grid2X2,
   Home,
   Layers,
@@ -27,9 +30,12 @@ import {
   Printer,
   Route,
   RotateCcw,
+  Scale,
   Search,
   Send,
   Settings,
+  Settings2,
+  ThermometerSun,
   Trash2,
   TriangleAlert,
   X,
@@ -179,6 +185,7 @@ interface UnqualifiedItem {
 }
 
 type QualityRiskCode = 'normal' | 'level1' | 'level2' | 'level3'
+type QualityWarningLevelFilter = 'all' | Exclude<QualityRiskCode, 'normal'>
 type InspectionOverviewDrilldown = 'sampling' | 'pending' | 'approval' | 'retain' | 'destroy'
 type InspectionTodoCategory = 'send' | 'receive' | 'inspect' | 'result' | 'approval' | 'destroy'
 type ReportViewMode = 'result' | 'report'
@@ -252,7 +259,7 @@ interface ReagentFlowHistory {
 }
 
 type ReagentApprovalStep = '编制人' | '审核人' | '批准人'
-type ReagentActionType = '入库' | '领用' | '归还' | '盘点'
+type ReagentActionType = '采购' | '入库' | '领用' | '归还' | '盘点'
 
 interface ReagentFlowRecord {
   recordNo: string
@@ -265,6 +272,7 @@ interface ReagentFlowRecord {
   handler: string
   time: string
   remark: string
+  supplier?: string
   approvalStatus: string
   approvalStep?: ReagentApprovalStep
   approvalHistory?: ReagentFlowHistory[]
@@ -290,6 +298,7 @@ interface ReagentProcessForm {
   time: string
   type: string
   remark: string
+  supplier: string
 }
 
 interface ReagentCabinetEnvironment {
@@ -301,6 +310,15 @@ interface ReagentCabinetEnvironment {
   sampledAt: string
 }
 
+interface ReagentCabinetRecord {
+  time: string
+  cabinetCode: string
+  cabinetName: string
+  temperature: number
+  humidity: number
+  status: string
+}
+
 interface EnvironmentRecord {
   time: string
   area: string
@@ -310,7 +328,7 @@ interface EnvironmentRecord {
 }
 
 type EnvironmentRange = 'day' | 'week' | 'month' | 'halfYear'
-type EnvironmentAlarmType = 'normal' | 'temperature' | 'humidity' | 'both'
+type EnvironmentAlarmType = 'all' | 'normal' | 'temperature' | 'humidity' | 'both'
 
 interface EnvironmentChartPoint {
   label: string
@@ -389,7 +407,7 @@ const showRetainForm = ref(false)
 const showRetainApprovalFlow = ref(false)
 const selectedRetainRecordNo = ref('')
 const retainApprovalOpinion = ref('')
-const retainForm = ref({ recordId: '', sampleNo: '', sampleName: '', sampleDate: '', sampleCount: '', sampleUnit: 'kg', specification: '', warehouseNo: '', cargoPosition: '', expireAt: '', sampleStatus: '待审批', handlingMethod: '留存', disposalTime: '', sourceRecordNo: '', remark: '' })
+const retainForm = ref({ recordId: '', sampleNo: '', sampleName: '', sampleDate: '', sampleCount: '', sampleUnit: 'kg', specification: '', warehouseNo: '', cargoPosition: '', expireAt: '', sampleStatus: '审批中', handlingMethod: '留存', disposalTime: '', sourceRecordNo: '', remark: '' })
 const internalRetainRecords = ref<SamplingRecord[]>([])
 const internalDestroyRecords = ref<SamplingRecord[]>([])
 const showDestroyForm = ref(false)
@@ -417,6 +435,7 @@ const instrumentEntryForm = ref({
   calibration: '',
 })
 const selectedCalibrationInstrumentCode = ref('')
+const showCalibrationHistoryDialog = ref(false)
 const showMaintenanceForm = ref(false)
 const selectedMaintenanceInstrumentCode = ref('')
 const maintenanceForm = ref({
@@ -428,12 +447,13 @@ const maintenanceForm = ref({
 const showAbandonForm = ref(false)
 const selectedAbandonInstrumentCode = ref('')
 const abandonForm = ref({ date: '2026-07-12', handler: '' })
+const showEnvironmentTrendDialog = ref(false)
 
 const showReagentEntryForm = ref(false)
 const showReagentApprovalFlow = ref(false)
 const selectedReagentRecordNo = ref('')
 const reagentProcessTab = ref<ReagentActionType>('入库')
-const reagentProcessTabs: ReagentActionType[] = ['入库', '领用', '归还', '盘点']
+const reagentProcessTabs: ReagentActionType[] = ['采购', '入库', '领用', '归还', '盘点']
 const showReagentFlowForm = ref(false)
 const reagentFlowForm = ref<ReagentProcessForm>({
   action: '入库',
@@ -449,11 +469,15 @@ const reagentFlowForm = ref<ReagentProcessForm>({
   time: '2026-07-12T09:00',
   type: '普通试剂',
   remark: '',
+  supplier: '',
 })
 const reagentFlowSourceRecordNo = ref('')
-const activeReagentCabinetIndex = ref(0)
 const selectedReagentCabinetCode = ref('A01')
 const showReagentCabinetHistory = ref(false)
+const showReagentCabinetTrendDialog = ref(false)
+const activeReagentCabinetRange = ref<EnvironmentRange>('day')
+const activeReagentCabinetFilter = ref('全部试剂柜')
+const activeReagentCabinetAlarmType = ref<EnvironmentAlarmType>('all')
 const hoveredReagentCabinetPoint = ref<EnvironmentChartPoint | null>(null)
 const reagentEntryForm = ref<ReagentProcessForm>({
   action: '入库',
@@ -469,9 +493,12 @@ const reagentEntryForm = ref<ReagentProcessForm>({
   time: '2026-07-12T09:00',
   type: '普通试剂',
   remark: '',
+  supplier: '',
 })
 
 const reportFilters = ref({ sampleNo: '', sampleName: '', processStatus: '' })
+const warningLevelFilter = ref<QualityWarningLevelFilter>('all')
+const warningFilters = ref({ keyword: '', warehouseNo: '', reason: '', date: '' })
 const showUnqualifiedDialog = ref(false)
 const showUserForm = ref(false)
 const selectedSamplingNo = ref('QY20260701001')
@@ -483,11 +510,11 @@ const ledgerFilter = ref({ grainType: '', source: '', reason: '', startDate: '',
 const activeQualityReport = ref('cargo')
 const activeWarehouseReportGrain = ref<'玉米' | '大豆'>('玉米')
 const labTab = ref('ledger')
-const reagentTab = ref('inventory')
+const reagentTab = ref('overview')
 const activeInstrumentType = ref('物理检测设备')
 const activeEnvironmentRange = ref<EnvironmentRange>('day')
 const activeEnvironmentArea = ref('全部区域')
-const activeEnvironmentAlarmType = ref<EnvironmentAlarmType>('normal')
+const activeEnvironmentAlarmType = ref<EnvironmentAlarmType>('all')
 const hoveredEnvironmentPoint = ref<EnvironmentChartPoint | null>(null)
 const environmentChartWidth = 860
 const environmentChartHeight = 320
@@ -614,8 +641,7 @@ const retainRecords = computed(() => [
 ])
 const destroyRecords = computed(() => [
   ...internalDestroyRecords.value,
-  ...reportRecords.value.filter((item) => (item.labelStatus === '销样' || (item.labelStatus === '留样' && retainStatusLevel(item) === 'expired')) && !internalDestroyRecords.value.some((destroy) => destroy.sampleNo === item.sampleNo)),
-  ...internalRetainRecords.value.filter((item) => retainStatusLevel(item) === 'expired' && !internalDestroyRecords.value.some((destroy) => destroy.destroySourceRetainId === (item.retainRecordId ?? item.sampleNo))),
+  ...reportRecords.value.filter((item) => item.labelStatus === '销样' && !internalDestroyRecords.value.some((destroy) => destroy.sampleNo === item.sampleNo)),
 ])
 
 const reportUnqualifiedMap: Record<string, string[]> = {
@@ -697,23 +723,23 @@ const qualityRiskLevel = (record: SamplingRecord) => {
   let code: QualityRiskCode = 'normal'
   let label = '正常'
   let shortLabel = '正常'
-  let status = '关键指标0项、普通指标0项，质量检验正常'
+  let status = '未发现不合格项目，质量检验正常'
 
   if (keyCount >= 2 || (keyCount === 1 && normalCount >= 2)) {
     code = 'level1'
     label = '一级预警'
     shortLabel = '一级'
-    status = `关键不合格${keyCount}项、普通不合格${normalCount}项，触发一级预警`
+    status = `共${total}项不合格，触发一级预警`
   } else if ((keyCount === 0 && normalCount >= 3) || (keyCount === 1 && normalCount <= 1)) {
     code = 'level2'
     label = '二级预警'
     shortLabel = '二级'
-    status = keyCount ? `关键不合格${keyCount}项、普通不合格${normalCount}项，触发二级预警` : `普通不合格${normalCount}项，触发二级预警`
+    status = `共${total}项不合格，触发二级预警`
   } else if (keyCount === 0 && normalCount >= 1 && normalCount <= 2) {
     code = 'level3'
     label = '三级预警'
     shortLabel = '三级'
-    status = `普通不合格${normalCount}项，触发三级预警`
+    status = `共${total}项不合格，触发三级预警`
   }
 
   return { code, label, shortLabel, status, keyCount, normalCount, total }
@@ -722,6 +748,19 @@ const qualityRiskLevel = (record: SamplingRecord) => {
 const openUnqualifiedItems = (sampleNo: string) => {
   selectedSamplingNo.value = sampleNo
   showUnqualifiedDialog.value = true
+}
+
+const qualityWarningTime = (record: SamplingRecord) => {
+  const capturedTimes = Object.values(record.reportResults ?? {})
+    .filter((result) => result.judgement === '不合格' && result.capturedAt)
+    .map((result) => String(result.capturedAt))
+    .sort((a, b) => b.localeCompare(a))
+  return capturedTimes[0]
+    ?? record.approvalHistory?.[record.approvalHistory.length - 1]?.time
+    ?? record.handleTime
+    ?? record.inspectionScanTime
+    ?? record.receiveTime
+    ?? record.samplingDate
 }
 
 const qualityWarningRecords = computed(() => {
@@ -736,10 +775,44 @@ const qualityWarningRecords = computed(() => {
         count: risk.total,
         level: risk.label,
         status: risk.status,
+        warningTime: qualityWarningTime(record),
       }
     })
     .filter((item) => item.risk.code !== 'normal')
 })
+
+const warningLevelTags = computed<{ key: QualityWarningLevelFilter; label: string; count: number }[]>(() => [
+  { key: 'all', label: '全部预警', count: qualityWarningRecords.value.length },
+  { key: 'level1', label: '一级预警', count: qualityWarningRecords.value.filter((item) => item.risk.code === 'level1').length },
+  { key: 'level2', label: '二级预警', count: qualityWarningRecords.value.filter((item) => item.risk.code === 'level2').length },
+  { key: 'level3', label: '三级预警', count: qualityWarningRecords.value.filter((item) => item.risk.code === 'level3').length },
+])
+
+const warningWarehouseOptions = computed(() => [...new Set(qualityWarningRecords.value.map((item) => item.record.warehouseNo))].sort((a, b) => Number(a) - Number(b)))
+const warningReasonOptions = computed(() => [...new Set(qualityWarningRecords.value.map((item) => item.record.reason))].sort())
+
+const warningDateText = (value: string) => {
+  const [year = '', month = '', day = ''] = value.replace(/[./]/g, '-').split(' ')[0].split('-')
+  return year && month && day ? `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}` : value
+}
+
+const filteredQualityWarningRecords = computed(() => {
+  const keyword = warningFilters.value.keyword.trim().toLowerCase()
+  return qualityWarningRecords.value.filter((item) => {
+    const record = item.record
+    if (warningLevelFilter.value !== 'all' && item.risk.code !== warningLevelFilter.value) return false
+    if (keyword && ![record.sampleNo, record.sampleName, record.reportNo ?? ''].some((value) => value.toLowerCase().includes(keyword))) return false
+    if (warningFilters.value.warehouseNo && record.warehouseNo !== warningFilters.value.warehouseNo) return false
+    if (warningFilters.value.reason && record.reason !== warningFilters.value.reason) return false
+    if (warningFilters.value.date && warningDateText(item.warningTime) !== warningFilters.value.date) return false
+    return true
+  })
+})
+
+const resetWarningFilters = () => {
+  warningLevelFilter.value = 'all'
+  warningFilters.value = { keyword: '', warehouseNo: '', reason: '', date: '' }
+}
 
 const qualityWarningStats = computed(() => {
   const rows = currentWarehouseSampleRecords.value.map((record) => qualityRiskLevel(record).code)
@@ -787,7 +860,7 @@ const warningRecords = computed(() => qualityWarningRecords.value.map((item) => 
   warehouse: `${item.record.warehouseNo}仓`,
   position: normalizedCargoPosition(item.record),
   sampleName: item.record.sampleName,
-  content: `关键${item.risk.keyCount}项 / 普通${item.risk.normalCount}项`,
+  content: `${item.count}项不合格`,
   status: item.status,
   sampleNo: item.record.sampleNo,
 })))
@@ -961,24 +1034,29 @@ const retainStatusText = (record: SamplingRecord) => {
 const destroyRecordForRetain = (record: SamplingRecord) => internalDestroyRecords.value.find((destroy) => destroy.destroySourceRetainId === (record.retainRecordId ?? record.sampleNo) || destroy.sampleNo === record.sampleNo)
 
 const retainLifecycleStatus = (record: SamplingRecord) => {
+  // 留样主状态只有四种；到期信息通过 retainExpireStatus 单独展示。
   if (record.retainSampleStatus === '已销样') return '已销样'
   const destroyRecord = destroyRecordForRetain(record)
   if (destroyRecord?.destroyApprovalStatus === '已销样') return '已销样'
   if (destroyRecord) return '销样中'
-  return retainStatusLevel(record) === 'expired' ? '已过期' : '留样中'
+  if (record.retainSampleStatus === '销样中') return '销样中'
+  if (!record.retainRecordId) return '留样中'
+  if (record.retainApprovalStatus !== '留样完成') return '审批中'
+  return '留样中'
 }
 
 const retainLifecycleTone = (record: SamplingRecord) => {
   const status = retainLifecycleStatus(record)
   if (status === '已销样') return 'destroyed'
   if (status === '销样中') return 'disposing'
-  if (status === '已过期') return 'expired'
+  if (status === '留样中' && retainStatusLevel(record) === 'expired') return 'expired'
   return 'normal'
 }
 
 const canStartDestroyFromRetain = (record: SamplingRecord) => {
-  const retainApproved = !record.retainRecordId || record.retainApprovalStatus === '留样完成'
-  return retainApproved && retainStatusLevel(record) === 'expired' && !destroyRecordForRetain(record) && !['销样中', '已销样'].includes(retainLifecycleStatus(record))
+  return retainLifecycleStatus(record) === '留样中'
+    && retainStatusLevel(record) === 'expired'
+    && !destroyRecordForRetain(record)
 }
 
 const retainWorkflowStatusText = (record: SamplingRecord) => {
@@ -1020,7 +1098,7 @@ const fillRetainFormFromSample = (target: SamplingRecord, existing?: SamplingRec
     warehouseNo: existing?.warehouseNo ?? target.warehouseNo,
     cargoPosition: existing?.cargoPosition ?? target.cargoPosition ?? `${target.warehouseNo}仓1号货位`,
     expireAt: existing?.retainExpireAt ?? '',
-    sampleStatus: existing?.retainSampleStatus ?? '待审批',
+    sampleStatus: '审批中',
     handlingMethod: existing?.retainHandlingMethod ?? '留存',
     disposalTime: existing?.retainDisposalTime ?? '',
     sourceRecordNo: target.orderNo,
@@ -1085,12 +1163,12 @@ const saveRetainForm = () => {
         packageType: form.specification,
         retainSpecification: form.specification,
         retainExpireAt: form.expireAt,
-        retainSampleStatus: form.sampleStatus,
+        retainSampleStatus: '审批中',
         retainHandlingMethod: form.handlingMethod,
-        retainDisposalTime: form.disposalTime,
+        retainDisposalTime: existing?.retainDisposalTime ?? '',
         retainApprovalStatus: '审批中',
         retainApprovalStep: '审核人',
-        retainTime: existing?.retainTime ?? currentDateTimeText(),
+        retainTime: existing?.retainTime,
         handleTime: currentDateTimeText(),
         remark: form.remark,
         retainApprovalHistory: [
@@ -1138,6 +1216,7 @@ const executeRetainApproval = (record: SamplingRecord, action: 'pass' | 'return'
   if (action === 'return') {
     addRetainApprovalHistory(record, `${record.retainApprovalStep}：不同意，退回修改`, opinion)
     record.retainApprovalStatus = '退回修改'
+    record.retainSampleStatus = '审批中'
     record.retainApprovalStep = undefined
     record.handleTime = currentDateTimeText()
     return
@@ -1155,6 +1234,7 @@ const executeRetainApproval = (record: SamplingRecord, action: 'pass' | 'return'
     addRetainApprovalHistory(record, '确认留样：审批流程完成', opinion)
     record.retainApprovalStep = undefined
     record.retainApprovalStatus = '留样完成'
+    record.retainSampleStatus = '留样中'
     record.retainTime = record.retainTime ?? currentDateTimeText()
     record.handleTime = currentDateTimeText()
   }
@@ -1177,8 +1257,12 @@ const approveRetainRecord = (action: 'pass' | 'return', record?: SamplingRecord)
 }
 
 const destroySourceRecords = computed(() => retainRecords.value.filter((record) => {
-  const alreadyDestroyed = internalDestroyRecords.value.some((destroy) => destroy.destroySourceRetainId === (record.retainRecordId ?? record.sampleNo))
-  return retainStatusLevel(record) === 'expired' && record.retainSampleStatus !== '已销样' && !alreadyDestroyed
+  const sourceId = record.retainRecordId ?? record.sampleNo
+  const editingRecord = internalDestroyRecords.value.find((destroy) => destroy.destroyRecordId === destroyForm.value.recordId)
+  const alreadyDestroyed = internalDestroyRecords.value.some((destroy) => destroy.destroySourceRetainId === sourceId && destroy.destroyRecordId !== destroyForm.value.recordId)
+  return !alreadyDestroyed
+    && record.retainSampleStatus !== '已销样'
+    && (retainLifecycleStatus(record) === '留样中' || editingRecord?.destroySourceRetainId === sourceId)
 }))
 
 const selectedDestroyRecord = computed(() => internalDestroyRecords.value.find((record) => record.destroyRecordId === selectedDestroyRecordNo.value) ?? internalDestroyRecords.value[0])
@@ -1254,7 +1338,7 @@ const startDestroyFromRetain = (record: SamplingRecord) => {
   const sourceId = record.retainRecordId ?? record.sampleNo
   const sourceText = retainStatusLevel(record) === 'expired' ? '留样到期' : '主动销样'
   confirmAction(
-    `确认将留样 ${record.sampleNo} 转入销样审批流程吗？`,
+    `样品 ${record.sampleNo} 已过期 ${Math.abs(retainExpireDiffDays(record) ?? 0)} 天，确认销样并自动转入销样审批流程吗？`,
     () => {
       internalDestroyRecords.value.unshift({
         ...record,
@@ -1274,7 +1358,7 @@ const startDestroyFromRetain = (record: SamplingRecord) => {
       record.retainHandlingMethod = sourceText
       record.handleTime = currentDateTimeText()
     },
-    { title: '转入销样审批确认', confirmText: '确认销样送审', danger: true },
+    { title: '确认销样', confirmText: '确认销样并送审', danger: true },
   )
 }
 
@@ -1291,6 +1375,16 @@ const destroyApprovalFlowItems = (record?: SamplingRecord) => {
 }
 
 const canApproveDestroy = (record?: SamplingRecord) => Boolean(record?.destroyApprovalStep && (record.destroyApprovalStep === currentLoginUser.value?.role || (record.destroyApprovalStep === '确认销样' && currentLoginUser.value?.role === '批准人')))
+
+const destroyApprovalTone = (record: SamplingRecord) => {
+  if (record.destroyApprovalStatus === '已销样') return 'destroyed'
+  if (record.destroyApprovalStatus === '退回修改') return 'returned'
+  if (record.destroyApprovalStep === '审核人') return 'review'
+  if (record.destroyApprovalStep === '负责人') return 'owner'
+  if (record.destroyApprovalStep === '批准人' || record.destroyApprovalStep === '确认销样') return 'approve'
+  if (record.destroyApprovalStatus === '审批中') return 'pending'
+  return 'history'
+}
 
 const openDestroyApprovalFlow = (record: SamplingRecord) => {
   selectedDestroyRecordNo.value = record.destroyRecordId ?? ''
@@ -1604,8 +1698,10 @@ const environmentRanges: { key: EnvironmentRange; label: string; points: number 
   { key: 'month', label: '近一个月', points: 30 },
   { key: 'halfYear', label: '近半年', points: 6 },
 ]
+const activeEnvironmentRangeLabel = computed(() => environmentRanges.find((item) => item.key === activeEnvironmentRange.value)?.label ?? '当日')
 
 const environmentAlarmTypes: { key: EnvironmentAlarmType; label: string }[] = [
+  { key: 'all', label: '全部状态' },
   { key: 'normal', label: '正常' },
   { key: 'temperature', label: '温度报警' },
   { key: 'humidity', label: '湿度报警' },
@@ -1630,7 +1726,7 @@ const localDateText = (date: Date) => {
 const buildEnvironmentHistory = (): EnvironmentRecord[] => {
   const rows: EnvironmentRecord[] = []
   const sampleTimes = ['08:00', '12:00', '16:00', '20:00']
-  const endDate = new Date('2026-07-12T00:00:00')
+  const endDate = new Date(`${formatDateText(new Date())}T00:00:00`)
   const alarmSamples = new Map<string, { temperature: number; humidity: number }>([
     ['0-0-1', { temperature: 31.2, humidity: 55 }],
     ['0-1-2', { temperature: 26.8, humidity: 62 }],
@@ -1680,18 +1776,20 @@ const buildEnvironmentHistory = (): EnvironmentRecord[] => {
 }
 
 const environmentRecords = buildEnvironmentHistory()
+const environmentRealtimeCollectedAt = ref(currentDateTimeText())
 const realtimeEnvironmentRecords = computed<EnvironmentRecord[]>(() => [
-  { time: '2026-07-12 20:30', area: '检化验室A区', temperature: 25.4, humidity: 56, status: environmentStatus(25.4, 56) },
-  { time: '2026-07-12 20:30', area: '物理检测区', temperature: 25.9, humidity: 57, status: environmentStatus(25.9, 57) },
-  { time: '2026-07-12 20:30', area: '化学检测区', temperature: 26.2, humidity: 58, status: environmentStatus(26.2, 58) },
-  { time: '2026-07-12 20:30', area: '快速检测区', temperature: 25.7, humidity: 56, status: environmentStatus(25.7, 56) },
-  { time: '2026-07-12 20:30', area: '样品制备区', temperature: 26.1, humidity: 59, status: environmentStatus(26.1, 59) },
+  { time: environmentRealtimeCollectedAt.value, area: '检化验室A区', temperature: 25.4, humidity: 56, status: environmentStatus(25.4, 56) },
+  { time: environmentRealtimeCollectedAt.value, area: '物理检测区', temperature: 25.9, humidity: 57, status: environmentStatus(25.9, 57) },
+  { time: environmentRealtimeCollectedAt.value, area: '化学检测区', temperature: 26.2, humidity: 58, status: environmentStatus(26.2, 58) },
+  { time: environmentRealtimeCollectedAt.value, area: '快速检测区', temperature: 25.7, humidity: 56, status: environmentStatus(25.7, 56) },
+  { time: environmentRealtimeCollectedAt.value, area: '样品制备区', temperature: 26.1, humidity: 59, status: environmentStatus(26.1, 59) },
 ])
 const environmentRealtimeTime = computed(() => realtimeEnvironmentRecords.value[0]?.time ?? '—')
 const environmentChartSourceRecords = computed(() => {
   const startTime = environmentRangeStartMap[activeEnvironmentRange.value]
   return environmentRecords
     .filter((item) => item.time.slice(0, 10) >= startTime)
+    .filter((item) => activeEnvironmentArea.value === '全部区域' || item.area === activeEnvironmentArea.value)
     .sort((a, b) => a.time.localeCompare(b.time))
 })
 const environmentRangeRecords = computed(() => {
@@ -1761,6 +1859,11 @@ const selectedCalibrationHistoryRows = computed(() => {
   ]
 })
 
+const openCalibrationHistory = (code: string) => {
+  selectedCalibrationInstrumentCode.value = code
+  showCalibrationHistoryDialog.value = true
+}
+
 const calibrationStats = computed(() => [
   { label: '仪器总数', value: calibrationPlanRows.value.length, tone: 'blue' },
   { label: '临期设备', value: calibrationPlanRows.value.filter((item) => item.statusTone === 'warn').length, tone: 'orange' },
@@ -1820,6 +1923,28 @@ const labInstrumentTypeSummary = computed(() => {
 
   return summary
 })
+
+const instrumentStatusTone = (instrument: LabInstrument) => {
+  if (instrument.status === '弃用' || calibrationStatus(instrument).tone === 'danger') return 'danger'
+  if (instrument.status !== '在用' || calibrationStatus(instrument).tone === 'warn') return 'warn'
+  return 'ok'
+}
+
+const instrumentTypeIcon = (type: string) => {
+  if (type.includes('水分')) return Droplets
+  if (type.includes('化学')) return FlaskConical
+  if (type.includes('制备')) return Settings2
+  if (type.includes('环境')) return ThermometerSun
+  return Scale
+}
+
+const instrumentTypeTone = (type: string) => {
+  if (type.includes('水分')) return 'moisture'
+  if (type.includes('化学')) return 'chemistry'
+  if (type.includes('制备')) return 'preparation'
+  if (type.includes('环境')) return 'environment'
+  return 'physical'
+}
 
 const activeInstrumentTypeRows = computed(() => labInstruments.value.filter((item) => item.type === activeInstrumentType.value))
 
@@ -1950,14 +2075,15 @@ const saveAbandonRecord = () => {
 }
 
 const environmentRangeStartMap: Record<EnvironmentRange, string> = {
-  day: '2026-07-12',
-  week: '2026-07-06',
-  month: '2026-06-13',
-  halfYear: '2026-02-01',
+  day: formatDateText(new Date()),
+  week: addDaysText(formatDateText(new Date()), -6),
+  month: addDaysText(formatDateText(new Date()), -29),
+  halfYear: addDaysText(formatDateText(new Date()), -179),
 }
 
 const filteredEnvironmentRecords = computed(() => {
   return environmentRangeRecords.value.filter((item) => {
+    if (activeEnvironmentAlarmType.value === 'all') return true
     if (activeEnvironmentAlarmType.value === 'normal') return item.status === '正常'
     if (activeEnvironmentAlarmType.value === 'temperature') return item.status === '温度报警'
     if (activeEnvironmentAlarmType.value === 'humidity') return item.status === '湿度报警'
@@ -1966,18 +2092,9 @@ const filteredEnvironmentRecords = computed(() => {
     .sort((a, b) => a.time.localeCompare(b.time))
 })
 
-const sampleEnvironmentRecords = (rows: EnvironmentRecord[], limit = 10) => {
-  if (rows.length <= limit) return [...rows].reverse()
-  const lastIndex = rows.length - 1
-  return Array.from({ length: limit }, (_, index) => {
-    const targetIndex = Math.max(0, Math.round(lastIndex - (index * lastIndex) / Math.max(1, limit - 1)))
-    return rows[targetIndex]
-  })
-}
-
 const environmentDisplayRecords = computed(() => {
   const rows = filteredEnvironmentRecords.value
-  if (activeEnvironmentRange.value === 'day') return rows.slice(-10).reverse()
+  if (activeEnvironmentRange.value === 'day') return [...rows].reverse()
 
   const groupedRows = new Map<string, EnvironmentRecord>()
   rows.forEach((row) => {
@@ -1987,8 +2104,10 @@ const environmentDisplayRecords = computed(() => {
     groupedRows.set(key, row)
   })
 
-  return sampleEnvironmentRecords([...groupedRows.values()])
+  return [...groupedRows.values()].reverse()
 })
+
+const environmentStatusTone = (status: string) => status === '正常' ? 'ok' : status === '温湿度报警' ? 'danger' : 'warn'
 
 const environmentAvgTemperature = computed(() => {
   const rows = realtimeEnvironmentRecords.value
@@ -1998,6 +2117,18 @@ const environmentAvgTemperature = computed(() => {
 
 const environmentAvgHumidity = computed(() => {
   const rows = realtimeEnvironmentRecords.value
+  if (!rows.length) return '—'
+  return `${Math.round(rows.reduce((total, item) => total + item.humidity, 0) / rows.length)}%`
+})
+
+const environmentTrendAvgTemperature = computed(() => {
+  const rows = environmentChartSourceRecords.value
+  if (!rows.length) return '—'
+  return `${(rows.reduce((total, item) => total + item.temperature, 0) / rows.length).toFixed(1)}℃`
+})
+
+const environmentTrendAvgHumidity = computed(() => {
+  const rows = environmentChartSourceRecords.value
   if (!rows.length) return '—'
   return `${Math.round(rows.reduce((total, item) => total + item.humidity, 0) / rows.length)}%`
 })
@@ -2077,47 +2208,161 @@ const reagentStocks = ref<ReagentStock[]>([
   { code: 'SJ-YZD-003', name: '高锰酸钾', type: '易制毒试剂', spec: '500g/瓶', stock: 3, unit: '瓶', threshold: 5, location: '易制毒双人双锁柜B03', keeper: '赵批准 / 王帅', status: '库存偏低' },
 ])
 
+const reagentCabinetSampledAt = currentDateTimeText()
 const reagentCabinets = ref<ReagentCabinetEnvironment[]>([
-  { code: 'A01', name: '普通试剂柜A01', type: '普通试剂柜', temperature: 24.8, humidity: 48, sampledAt: '2026-07-12 20:30' },
-  { code: 'A02', name: '普通试剂柜A02', type: '普通试剂柜', temperature: 25.1, humidity: 50, sampledAt: '2026-07-12 20:30' },
-  { code: 'A03', name: '普通试剂柜A03', type: '普通试剂柜', temperature: 24.6, humidity: 47, sampledAt: '2026-07-12 20:30' },
-  { code: 'B01', name: '易制毒双人双锁柜B01', type: '易制毒双人双锁柜', temperature: 23.9, humidity: 46, sampledAt: '2026-07-12 20:30' },
-  { code: 'B02', name: '易制毒双人双锁柜B02', type: '易制毒双人双锁柜', temperature: 24.2, humidity: 45, sampledAt: '2026-07-12 20:30' },
-  { code: 'B03', name: '易制毒双人双锁柜B03', type: '易制毒双人双锁柜', temperature: 24.4, humidity: 49, sampledAt: '2026-07-12 20:30' },
+  { code: 'A01', name: '普通试剂柜A01', type: '普通试剂柜', temperature: 24.8, humidity: 48, sampledAt: reagentCabinetSampledAt },
+  { code: 'A02', name: '普通试剂柜A02', type: '普通试剂柜', temperature: 25.1, humidity: 50, sampledAt: reagentCabinetSampledAt },
+  { code: 'A03', name: '普通试剂柜A03', type: '普通试剂柜', temperature: 27.6, humidity: 47, sampledAt: reagentCabinetSampledAt },
+  { code: 'B01', name: '易制毒双人双锁柜B01', type: '易制毒双人双锁柜', temperature: 23.9, humidity: 46, sampledAt: reagentCabinetSampledAt },
+  { code: 'B02', name: '易制毒双人双锁柜B02', type: '易制毒双人双锁柜', temperature: 24.2, humidity: 45, sampledAt: reagentCabinetSampledAt },
+  { code: 'B03', name: '易制毒双人双锁柜B03', type: '易制毒双人双锁柜', temperature: 24.4, humidity: 49, sampledAt: reagentCabinetSampledAt },
 ])
 
-const activeReagentCabinet = computed(() => reagentCabinets.value[activeReagentCabinetIndex.value] ?? reagentCabinets.value[0])
 const selectedReagentCabinet = computed(() => reagentCabinets.value.find((item) => item.code === selectedReagentCabinetCode.value) ?? reagentCabinets.value[0])
+const reagentCabinetByCode = (code: string) => reagentCabinets.value.find((item) => item.code === code) ?? reagentCabinets.value[0]
+
+const reagentCabinetStorageStandard = (cabinet: ReagentCabinetEnvironment) => cabinet.type === '易制毒双人双锁柜'
+  ? { temperature: '15-25℃', minTemperature: 15, maxTemperature: 25, humidity: '30-60%', minHumidity: 30, maxHumidity: 60 }
+  : { temperature: '15-25℃', minTemperature: 15, maxTemperature: 25, humidity: '30-60%', minHumidity: 30, maxHumidity: 60 }
+
+const reagentCabinetAlert = (cabinet: ReagentCabinetEnvironment) => {
+  const standard = reagentCabinetStorageStandard(cabinet)
+  if (cabinet.temperature < standard.minTemperature || cabinet.temperature > standard.maxTemperature) return `温度${cabinet.temperature}℃超出标准 ${standard.temperature}`
+  if (cabinet.humidity < standard.minHumidity || cabinet.humidity > standard.maxHumidity) return `湿度${cabinet.humidity}%超出标准 ${standard.humidity}`
+  return ''
+}
+
+const reagentCabinetStatus = (cabinet: ReagentCabinetEnvironment, temperature: number, humidity: number) => {
+  const standard = reagentCabinetStorageStandard(cabinet)
+  const temperatureAlarm = temperature < standard.minTemperature || temperature > standard.maxTemperature
+  const humidityAlarm = humidity < standard.minHumidity || humidity > standard.maxHumidity
+  if (temperatureAlarm && humidityAlarm) return '温湿度报警'
+  if (temperatureAlarm) return '温度报警'
+  if (humidityAlarm) return '湿度报警'
+  return '正常'
+}
+
+const reagentCabinetItems = (cabinet: ReagentCabinetEnvironment | undefined) => cabinet ? reagentStocks.value.filter((item) => item.location.includes(cabinet.code)) : []
+const selectedReagentCabinetItems = computed(() => reagentCabinetItems(selectedReagentCabinet.value))
+const reagentCabinetAlertCount = computed(() => reagentCabinets.value.filter((cabinet) => reagentCabinetAlert(cabinet)).length)
+
+const buildReagentCabinetHistory = (): ReagentCabinetRecord[] => {
+  const rows: ReagentCabinetRecord[] = []
+  const sampleTimes = ['08:00', '12:00', '16:00', '20:00']
+  const endDate = new Date(`${formatDateText(new Date())}T00:00:00`)
+
+  for (let offset = 0; offset < 180; offset += 1) {
+    const current = new Date(endDate)
+    current.setDate(endDate.getDate() - offset)
+    const dateText = localDateText(current)
+
+    reagentCabinets.value.forEach((cabinet, cabinetIndex) => {
+      sampleTimes.forEach((time, timeIndex) => {
+        const seasonal = Math.sin((180 - offset) / 21) * 1.1
+        const daily = [0, 0.5, 0.9, 0.3][timeIndex]
+        let temperature = Number((23.1 + seasonal + daily + cabinetIndex * 0.18).toFixed(1))
+        let humidity = Math.round(45 + Math.cos(offset / 12) * 3 + cabinetIndex * 0.7 + timeIndex)
+
+        if (offset === 0 && cabinet.code === 'A03') {
+          temperature = Number((26.7 + timeIndex * 0.3).toFixed(1))
+        }
+        if (offset === 5 && cabinet.code === 'B02' && timeIndex === 2) humidity = 63
+        if (offset === 18 && cabinet.code === 'A01' && timeIndex === 3) temperature = 26.4
+
+        rows.push({
+          time: `${dateText} ${time}`,
+          cabinetCode: cabinet.code,
+          cabinetName: cabinet.name,
+          temperature,
+          humidity,
+          status: reagentCabinetStatus(cabinet, temperature, humidity),
+        })
+      })
+    })
+  }
+
+  return rows.sort((a, b) => a.time.localeCompare(b.time))
+}
+
+const reagentCabinetRecords = buildReagentCabinetHistory()
+const activeReagentCabinetRangeLabel = computed(() => environmentRanges.find((item) => item.key === activeReagentCabinetRange.value)?.label ?? '当日')
+const reagentCabinetRealtimeRecords = computed<ReagentCabinetRecord[]>(() => reagentCabinets.value.map((cabinet) => ({
+  time: cabinet.sampledAt,
+  cabinetCode: cabinet.code,
+  cabinetName: cabinet.name,
+  temperature: cabinet.temperature,
+  humidity: cabinet.humidity,
+  status: reagentCabinetStatus(cabinet, cabinet.temperature, cabinet.humidity),
+})))
+
+const reagentCabinetRangeRecords = computed(() => reagentCabinetRecords
+  .filter((item) => item.time.slice(0, 10) >= environmentRangeStartMap[activeReagentCabinetRange.value])
+  .filter((item) => activeReagentCabinetFilter.value === '全部试剂柜' || item.cabinetCode === activeReagentCabinetFilter.value)
+  .sort((a, b) => a.time.localeCompare(b.time)))
+
+const filteredReagentCabinetRecords = computed(() => reagentCabinetRangeRecords.value.filter((item) => {
+  if (activeReagentCabinetAlarmType.value === 'all') return true
+  if (activeReagentCabinetAlarmType.value === 'normal') return item.status === '正常'
+  if (activeReagentCabinetAlarmType.value === 'temperature') return item.status === '温度报警'
+  if (activeReagentCabinetAlarmType.value === 'humidity') return item.status === '湿度报警'
+  return item.status === '温湿度报警'
+}))
+
+const reagentCabinetDisplayRecords = computed(() => {
+  const rows = filteredReagentCabinetRecords.value
+  if (activeReagentCabinetRange.value === 'day') return [...rows].reverse()
+
+  const groupedRows = new Map<string, ReagentCabinetRecord>()
+  rows.forEach((row) => {
+    const key = activeReagentCabinetRange.value === 'halfYear'
+      ? `${row.time.slice(0, 7)}-${row.cabinetCode}`
+      : `${row.time.slice(0, 10)}-${row.cabinetCode}`
+    groupedRows.set(key, row)
+  })
+  return [...groupedRows.values()].reverse()
+})
+
+const reagentCabinetAvgTemperature = computed(() => `${(reagentCabinetRealtimeRecords.value.reduce((total, item) => total + item.temperature, 0) / Math.max(1, reagentCabinetRealtimeRecords.value.length)).toFixed(1)}℃`)
+const reagentCabinetAvgHumidity = computed(() => `${Math.round(reagentCabinetRealtimeRecords.value.reduce((total, item) => total + item.humidity, 0) / Math.max(1, reagentCabinetRealtimeRecords.value.length))}%`)
 
 const reagentCabinetHistoryRows = computed(() => {
-  const cabinet = selectedReagentCabinet.value
-  if (!cabinet) return []
-  return Array.from({ length: 12 }, (_, index) => {
-    const hour = String(index * 2).padStart(2, '0')
-    const temperature = Number((cabinet.temperature - 0.8 + Math.sin(index / 1.8) * 0.7 + (index % 3) * 0.1).toFixed(1))
-    const humidity = Math.round(cabinet.humidity - 3 + Math.cos(index / 2.2) * 3 + (index % 2))
-    return { time: `2026-07-12 ${hour}:00`, temperature, humidity }
-  })
+  const today = formatDateText(new Date())
+  return reagentCabinetRecords
+    .filter((item) => item.cabinetCode === selectedReagentCabinetCode.value && item.time.startsWith(today))
+    .sort((a, b) => b.time.localeCompare(a.time))
 })
 
 const reagentCabinetChartRows = computed<EnvironmentChartPoint[]>(() => {
-  const rows = reagentCabinetHistoryRows.value
-  if (!rows.length) return []
-  const temperatureValues = rows.map((item) => item.temperature)
-  const humidityValues = rows.map((item) => item.humidity)
+  const activeRange = environmentRanges.find((item) => item.key === activeReagentCabinetRange.value)
+  const maxPoints = activeRange?.points ?? 8
+  const groupedRows = new Map<string, ReagentCabinetRecord[]>()
+  reagentCabinetRangeRecords.value.forEach((record) => {
+    let key = ''
+    if (activeReagentCabinetRange.value === 'day') key = record.time.slice(11, 16)
+    else if (activeReagentCabinetRange.value === 'week' || activeReagentCabinetRange.value === 'month') key = record.time.slice(0, 10)
+    else key = record.time.slice(0, 7)
+    groupedRows.set(key, [...(groupedRows.get(key) ?? []), record])
+  })
+
+  const groups = [...groupedRows.entries()].slice(-maxPoints)
+  if (!groups.length) return []
+  const temperatureValues = groups.map(([, rows]) => rows.reduce((total, item) => total + item.temperature, 0) / rows.length)
+  const humidityValues = groups.map(([, rows]) => rows.reduce((total, item) => total + item.humidity, 0) / rows.length)
   const temperatureMin = Math.min(...temperatureValues, 20)
   const temperatureMax = Math.max(...temperatureValues, 32)
   const humidityMin = Math.min(...humidityValues, 40)
   const humidityMax = Math.max(...humidityValues, 70)
 
-  return rows.map((item, index) => {
-    const temperaturePoint = chartPoint(index, item.temperature, temperatureMin, temperatureMax, rows.length)
-    const humidityPoint = chartPoint(index, item.humidity, humidityMin, humidityMax, rows.length)
+  return groups.map(([, rows], index) => {
+    const temperature = Number((rows.reduce((total, item) => total + item.temperature, 0) / rows.length).toFixed(1))
+    const humidity = Math.round(rows.reduce((total, item) => total + item.humidity, 0) / rows.length)
+    const temperaturePoint = chartPoint(index, temperature, temperatureMin, temperatureMax, groups.length)
+    const humidityPoint = chartPoint(index, humidity, humidityMin, humidityMax, groups.length)
     return {
-      label: item.time.slice(11, 16),
-      date: item.time,
-      temperature: item.temperature,
-      humidity: item.humidity,
+      label: formatEnvironmentLabel(activeReagentCabinetRange.value, rows[rows.length - 1].time),
+      date: rows[rows.length - 1].time,
+      temperature,
+      humidity,
       x: temperaturePoint.x,
       temperatureY: temperaturePoint.y,
       humidityY: humidityPoint.y,
@@ -2128,9 +2373,26 @@ const reagentCabinetChartRows = computed<EnvironmentChartPoint[]>(() => {
 const reagentCabinetTemperaturePoints = computed(() => reagentCabinetChartRows.value.map((item) => `${item.x},${item.temperatureY}`).join(' '))
 const reagentCabinetHumidityPoints = computed(() => reagentCabinetChartRows.value.map((item) => `${item.x},${item.humidityY}`).join(' '))
 
-const nextReagentCabinet = () => {
-  activeReagentCabinetIndex.value = (activeReagentCabinetIndex.value + 1) % reagentCabinets.value.length
+const showReagentCabinetAxisLabel = (index: number, total: number) => {
+  if (activeReagentCabinetRange.value !== 'month') return true
+  return index === 0 || index === total - 1 || index % 3 === 0
 }
+
+const reagentCabinetTrendAvgTemperature = computed(() => {
+  const rows = reagentCabinetRangeRecords.value
+  if (!rows.length) return '—'
+  return `${(rows.reduce((total, item) => total + item.temperature, 0) / rows.length).toFixed(1)}℃`
+})
+
+const reagentCabinetTrendAvgHumidity = computed(() => {
+  const rows = reagentCabinetRangeRecords.value
+  if (!rows.length) return '—'
+  return `${Math.round(rows.reduce((total, item) => total + item.humidity, 0) / rows.length)}%`
+})
+
+watch([activeReagentCabinetRange, activeReagentCabinetFilter, activeReagentCabinetAlarmType], () => {
+  hoveredReagentCabinetPoint.value = null
+})
 
 const openReagentCabinetHistory = (cabinet: ReagentCabinetEnvironment) => {
   selectedReagentCabinetCode.value = cabinet.code
@@ -2150,6 +2412,8 @@ const reagentFlowRecords = ref<ReagentFlowRecord[]>([
 
 const ensureReagentUsageDemoRecords = () => {
   const demoRecords: ReagentFlowRecord[] = [
+    { recordNo: 'SJCG-2026071201', action: '采购', reagentCode: 'SJ-PT-004', reagentName: '甲基红指示剂', quantity: 8, unit: '瓶', location: '普通试剂柜A01', handler: '王帅', supplier: '镇江标准试剂有限公司', time: '2026-07-12 08:30', remark: '低库存补充采购', approvalStatus: '审批中', approvalStep: '审核人', processStatus: '审批中', stockApplied: false, approvalHistory: [{ title: '提交：采购申请', user: '王帅（编制人）', time: '2026-07-12 08:30' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-12 08:40' }] },
+    { recordNo: 'SJCG-2026071101', action: '采购', reagentCode: 'SJ-PT-005', reagentName: '石油醚', quantity: 12, unit: '瓶', location: '普通试剂柜A02', handler: '质检员A', supplier: '江苏粮检试剂供应中心', time: '2026-07-11 09:00', remark: '月度采购计划', approvalStatus: '审批通过', stockApplied: false, approvalHistory: [{ title: '提交：采购申请', user: '质检员A（编制人）', time: '2026-07-11 09:00' }, { title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-11 11:00' }] },
     { recordNo: 'SJLC-2026070601', action: '领用', reagentCode: 'SJ-PT-001', reagentName: '无水乙醇', quantity: 2, unit: '瓶', location: '普通试剂柜A01', handler: '质检员A', time: '2026-07-06 09:20', remark: '水分检测前处理', approvalStatus: '审批通过', processStatus: '领用中', stockApplied: true, approvalHistory: [{ title: '提交：领用申请', user: '质检员A（编制人）', time: '2026-07-06 09:22' }, { title: '审批完成：领用放行', user: '赵批准（批准人）', time: '2026-07-06 09:40' }] },
     { recordNo: 'SJLC-2026070602', action: '领用', reagentCode: 'SJ-PT-002', reagentName: '氢氧化钠标准溶液', quantity: 1, unit: '瓶', location: '普通试剂柜A02', handler: '王帅', time: '2026-07-06 13:10', remark: '酸值测定领用', approvalStatus: '审批通过', processStatus: '领用中', stockApplied: true, approvalHistory: [{ title: '提交：领用申请', user: '王帅（编制人）', time: '2026-07-06 13:12' }, { title: '审批完成：领用放行', user: '赵批准（批准人）', time: '2026-07-06 13:30' }] },
     { recordNo: 'SJLC-2026070603', action: '领用', reagentCode: 'SJ-YZD-001', reagentName: '盐酸', quantity: 1, unit: '瓶', location: '易制毒双人双锁柜B01', handler: '李审核', time: '2026-07-06 15:00', remark: '脂肪酸值复测', approvalStatus: '审批通过', processStatus: '领用中', stockApplied: true, approvalHistory: [{ title: '提交：领用申请', user: '李审核（编制人）', time: '2026-07-06 15:02' }, { title: '审批完成：领用放行', user: '赵批准（批准人）', time: '2026-07-06 15:25' }] },
@@ -2171,13 +2435,18 @@ const reagentStats = computed(() => [
 const reagentFlowSummary = computed(() => {
   const records = reagentFlowRecords.value
   return [
-    { label: '入库', value: records.filter((item) => item.action === '入库').length },
-    { label: '领用', value: records.filter((item) => item.action === '领用').length },
-    { label: '归还', value: records.filter((item) => item.action === '归还').length },
-    { label: '盘点', value: records.filter((item) => item.action === '盘点').length },
-    { label: '待审批', value: records.filter((item) => item.approvalStatus === '审批中' || item.approvalStatus === '未提交').length },
+    { label: '采购', value: records.filter((item) => item.action === '采购').length, tone: 'purchase' },
+    { label: '入库', value: records.filter((item) => item.action === '入库').length, tone: 'inbound' },
+    { label: '领用', value: records.filter((item) => item.action === '领用').length, tone: 'usage' },
+    { label: '归还', value: records.filter((item) => item.action === '归还').length, tone: 'return' },
+    { label: '盘点', value: records.filter((item) => item.action === '盘点').length, tone: 'inventory' },
   ]
 })
+
+const openReagentFlowModule = (label: string) => {
+  reagentTab.value = 'records'
+  reagentProcessTab.value = label as ReagentActionType
+}
 
 const lowStockReagents = computed(() => reagentStocks.value.filter((item) => item.stock <= item.threshold))
 
@@ -2203,6 +2472,7 @@ const resetReagentFlowForm = (action: ReagentActionType) => {
     time: '2026-07-12T09:00',
     type: '普通试剂',
     remark: '',
+    supplier: '',
   }
   reagentFlowSourceRecordNo.value = ''
 }
@@ -2248,6 +2518,22 @@ const openReagentFlowForm = (action: ReagentActionType, sourceRecordNo = '') => 
   showReagentFlowForm.value = true
 }
 
+const openInboundFromProcurement = (record: ReagentFlowRecord) => {
+  resetReagentFlowForm('入库')
+  reagentFlowSourceRecordNo.value = record.recordNo
+  reagentFlowForm.value = {
+    ...reagentFlowForm.value,
+    reagentCode: record.reagentCode,
+    name: record.reagentName,
+    spec: reagentStocks.value.find((item) => item.code === record.reagentCode)?.spec ?? '',
+    unit: record.unit,
+    quantity: record.quantity,
+    location: record.location,
+    remark: `采购单 ${record.recordNo} 到货入库`,
+  }
+  showReagentFlowForm.value = true
+}
+
 const updateReagentStockStatus = (stock: ReagentStock) => {
   stock.status = stock.stock <= stock.threshold ? '库存偏低' : stock.type === '易制毒试剂' ? '重点管控' : '库存正常'
 }
@@ -2260,6 +2546,10 @@ const saveReagentFlow = () => {
   const recordNo = `SJLC-${String(Date.now()).slice(-8)}`
   const time = formatDateTimeValue(form.time)
   const stock = reagentStocks.value.find((item) => item.code === form.reagentCode)
+
+  if (form.action === '采购') {
+    reagentFlowRecords.value.unshift({ recordNo, action: '采购', reagentCode: form.reagentCode || `CG-${String(Date.now()).slice(-6)}`, reagentName: form.name || '待采购试剂', quantity, unit: form.unit, location: form.location || '待入库', handler: form.handler || '系统', time, remark: form.remark || '新增采购申请', supplier: form.supplier || '待填写供应商', approvalStatus: '审批中', approvalStep: '编制人', processStatus: '审批中', stockApplied: false, approvalHistory: [{ title: '提交：采购申请', user: `${form.handler || currentLoginUser.value?.name || '编制人'}（编制人）`, time }] })
+  }
 
   if (form.action === '入库') {
     if (stock) {
@@ -2284,7 +2574,7 @@ const saveReagentFlow = () => {
       })
       updateReagentStockStatus(reagentStocks.value[reagentStocks.value.length - 1])
     }
-    reagentFlowRecords.value.unshift({ recordNo, action: '入库', reagentCode: form.reagentCode || reagentStocks.value[reagentStocks.value.length - 1].code, reagentName: form.name || stock?.name || '新试剂', quantity, unit: form.unit, location: form.location || stock?.location || '试剂柜', handler: form.handler || '系统', time, remark: form.remark || '试剂入库登记', approvalStatus: '已入库', stockApplied: true })
+    reagentFlowRecords.value.unshift({ recordNo, action: '入库', reagentCode: form.reagentCode || reagentStocks.value[reagentStocks.value.length - 1].code, reagentName: form.name || stock?.name || '新试剂', quantity, unit: form.unit, location: form.location || stock?.location || '试剂柜', handler: form.handler || '系统', time, remark: form.remark || '试剂入库登记', approvalStatus: '已入库', sourceRecordNo: reagentFlowSourceRecordNo.value || undefined, stockApplied: true })
   }
 
   if (form.action === '领用' && stock) {
@@ -2322,6 +2612,7 @@ const completeReagentInventory = (recordNo: string) => {
 }
 
 const reagentProcessStatusText = (record: ReagentFlowRecord) => {
+  if (record.action === '采购') return record.approvalStatus === '审批通过' ? '采购审批通过' : record.approvalStatus
   if (record.action === '领用') return record.processStatus ?? '审批中'
   if (record.action === '归还') return record.processStatus ?? '已归还'
   if (record.action === '盘点') return record.processStatus ?? '已盘点'
@@ -2659,7 +2950,7 @@ const inspectionTodoMeta = computed(() => {
     inspect: { title: '待检业务', description: '已收样、等待扫码录入的样品' },
     result: { title: '待录入结果业务', description: '检测进行中、等待录入检验结果的样品' },
     approval: { title: '待审批业务', description: '质检结果已提交、等待审批流处理的样品' },
-    destroy: { title: '待销样业务', description: '已转入销样管理或留样到期的样品' },
+    destroy: { title: '待销样业务', description: '已确认销样并进入销样审批流程的样品' },
   }
   return category ? meta[category] : { title: '', description: '' }
 })
@@ -2846,6 +3137,70 @@ const createWorkflowStatusTestRecord = (overrides: Partial<SamplingRecord>): Sam
   ...overrides,
 })
 
+const createDestroyTestRetainRecord = (index: number, overrides: Partial<SamplingRecord> = {}): SamplingRecord => createWorkflowStatusTestRecord({
+  orderNo: `LY-TEST-${String(index).padStart(3, '0')}`,
+  retainRecordId: `LY-TEST-${String(index).padStart(3, '0')}`,
+  sampleNo: `YP-XY-TEST-${String(index).padStart(3, '0')}`,
+  sampleName: `${49 + index}仓销样流程测试样品${index}`,
+  status: '留样登记',
+  labelStatus: '留样',
+  approvalStatus: '审批通过',
+  retainApprovalStatus: '留样完成',
+  retainSampleStatus: '留样中',
+  retainApprovalHistory: [
+    { title: '留样送审', user: '王帅（编制人）', time: '2026-06-01 09:00' },
+    { title: '确认留样：审批流程完成', user: '赵批准（批准人）', time: '2026-06-01 11:00' },
+  ],
+  samplingDate: '2026-05-31',
+  receiveTime: '2026-05-31 16:00',
+  retainTime: '2026-06-01 11:00',
+  retainExpireAt: '2026-07-10',
+  retainCount: '1',
+  retainSpecification: '1kg密封留样袋',
+  retainHandlingMethod: '留存',
+  warehouseNo: String(49 + index),
+  cargoPosition: `${49 + index}仓1号货位`,
+  remark: '销样状态流转测试数据。',
+  ...overrides,
+})
+
+const destroyTestRetainRecords: SamplingRecord[] = [
+  createDestroyTestRetainRecord(1, { sampleName: '50仓过期待确认销样测试样品', retainExpireAt: '2026-07-10' }),
+  createDestroyTestRetainRecord(2, { sampleName: '51仓销样审核人审批测试样品', retainSampleStatus: '销样中', retainExpireAt: '2026-07-08', retainHandlingMethod: '留样到期' }),
+  createDestroyTestRetainRecord(3, { sampleName: '52仓销样负责人审批测试样品', retainSampleStatus: '销样中', retainExpireAt: '2026-07-05', retainHandlingMethod: '留样到期' }),
+  createDestroyTestRetainRecord(4, { sampleName: '53仓销样最终确认测试样品', retainSampleStatus: '销样中', retainExpireAt: '2026-08-15', retainHandlingMethod: '主动销样' }),
+  createDestroyTestRetainRecord(5, { sampleName: '54仓已销样测试样品', retainSampleStatus: '已销样', retainExpireAt: '2026-07-01', retainHandlingMethod: '留样到期', retainDisposalTime: '2026-07-12 15:30' }),
+]
+
+const createDestroyTestRecord = (source: SamplingRecord, step?: SamplingRecord['destroyApprovalStep'], completed = false): SamplingRecord => ({
+  ...source,
+  orderNo: `XX-TEST-${source.sampleNo.slice(-3)}`,
+  status: '销样登记',
+  labelStatus: '销样',
+  reportNo: undefined,
+  destroyRecordId: `XX-TEST-${source.sampleNo.slice(-3)}`,
+  destroySourceRetainId: source.retainRecordId,
+  destroyApprovalStatus: completed ? '已销样' : '审批中',
+  destroyApprovalStep: completed ? undefined : step,
+  destroyVariety: source.grainType,
+  destroySource: source.retainHandlingMethod === '主动销样' ? '主动销样' : '留样到期',
+  destroyTime: completed ? '2026-07-12 15:30' : undefined,
+  destroyApprovalHistory: [
+    { title: '销样送审', user: '王帅（编制人）', time: '2026-07-12 09:00' },
+    ...(step === '负责人' || step === '批准人' || step === '确认销样' || completed ? [{ title: '审核人：审批通过/同意', user: '李审核（审核人）', time: '2026-07-12 10:00' }] : []),
+    ...(step === '批准人' || step === '确认销样' || completed ? [{ title: '负责人：审批通过/同意', user: '周负责（负责人）', time: '2026-07-12 11:00' }] : []),
+    ...(step === '确认销样' || completed ? [{ title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-12 14:00' }] : []),
+    ...(completed ? [{ title: '确认销样：销样流程完成', user: '赵批准（批准人）', time: '2026-07-12 15:30' }] : []),
+  ],
+})
+
+const destroyManagementTestRecords: SamplingRecord[] = [
+  createDestroyTestRecord(destroyTestRetainRecords[1], '审核人'),
+  createDestroyTestRecord(destroyTestRetainRecords[2], '负责人'),
+  createDestroyTestRecord(destroyTestRetainRecords[3], '确认销样'),
+  createDestroyTestRecord(destroyTestRetainRecords[4], undefined, true),
+]
+
 const workflowStatusTestRecords: SamplingRecord[] = [
   createWorkflowStatusTestRecord({ orderNo: 'QY20260713001', sampleNo: 'YP20260713001', sampleName: '49仓玉米录入中测试样品', status: '录入中', remark: '用于验证扦样单录入中状态。' }),
   createWorkflowStatusTestRecord({ orderNo: 'QY20260713002', sampleNo: 'YP20260713002', sampleName: '50仓大豆扦样完成测试样品', status: '扦样完成', grainType: '大豆', warehouseNo: '50', origin: '黑龙江', cargoPosition: '50仓1号货位', sampler: '李四', remark: '用于验证扦样完成待送样状态。' }),
@@ -2914,6 +3269,17 @@ const ensureQualityWarningTestRecords = () => {
   })
 }
 
+const ensureDestroyManagementTestRecords = () => {
+  const retainIds = new Set(internalRetainRecords.value.map((record) => record.retainRecordId))
+  destroyTestRetainRecords.forEach((record) => {
+    if (!retainIds.has(record.retainRecordId)) internalRetainRecords.value.push(record)
+  })
+  const destroyIds = new Set(internalDestroyRecords.value.map((record) => record.destroyRecordId))
+  destroyManagementTestRecords.forEach((record) => {
+    if (!destroyIds.has(record.destroyRecordId)) internalDestroyRecords.value.push(record)
+  })
+}
+
 const loadPersistedState = () => {
   const ensureResponsibleAccount = () => {
     if (systemUsers.value.some((user) => user.username === 'fuzeren')) return
@@ -2922,6 +3288,7 @@ const loadPersistedState = () => {
   const raw = localStorage.getItem(storageKey)
   if (!raw) {
     ensureResponsibleAccount()
+    ensureDestroyManagementTestRecords()
     return
   }
   try {
@@ -2930,12 +3297,20 @@ const loadPersistedState = () => {
     if (Array.isArray(state.externalSamplingRecords)) externalSamplingRecords.value = state.externalSamplingRecords.filter(isSupportedInspectionRecord)
     if (Array.isArray(state.retainRecords)) internalRetainRecords.value = state.retainRecords
     if (Array.isArray(state.destroyRecords)) internalDestroyRecords.value = state.destroyRecords
+    ensureDestroyManagementTestRecords()
     internalDestroyRecords.value.forEach((record) => {
       if (record.destroyApprovalStatus === '销样完成') record.destroyApprovalStatus = '已销样'
       if (record.destroyApprovalStatus === '已销样') {
         const source = internalRetainRecords.value.find((retain) => retain.retainRecordId === record.destroySourceRetainId || retain.sampleNo === record.sampleNo)
         if (source) source.retainSampleStatus = '已销样'
       }
+    })
+    internalRetainRecords.value.forEach((record) => {
+      const destroyRecord = internalDestroyRecords.value.find((destroy) => destroy.destroySourceRetainId === (record.retainRecordId ?? record.sampleNo) || destroy.sampleNo === record.sampleNo)
+      if (destroyRecord?.destroyApprovalStatus === '已销样') record.retainSampleStatus = '已销样'
+      else if (destroyRecord) record.retainSampleStatus = '销样中'
+      else if (record.retainApprovalStatus === '留样完成') record.retainSampleStatus = '留样中'
+      else record.retainSampleStatus = '审批中'
     })
     if (Array.isArray(state.systemUsers)) systemUsers.value = state.systemUsers
     ensureResponsibleAccount()
@@ -2953,6 +3328,7 @@ const loadPersistedState = () => {
     localStorage.removeItem(storageKey)
     ensureResponsibleAccount()
     ensureQualityWarningTestRecords()
+    ensureDestroyManagementTestRecords()
   }
 }
 
@@ -2988,10 +3364,6 @@ const warehousePositionTimer = window.setInterval(() => {
 }, 3000)
 
 onUnmounted(() => window.clearInterval(warehousePositionTimer))
-
-const reagentCabinetTimer = window.setInterval(nextReagentCabinet, 4000)
-
-onUnmounted(() => window.clearInterval(reagentCabinetTimer))
 
 watch([internalSamplingRecords, externalSamplingRecords, internalRetainRecords, internalDestroyRecords, systemUsers, deletedLabelNos, reagentStocks, reagentFlowRecords], persistState, { deep: true })
 watch(selectedWarehouse, () => {
@@ -3290,6 +3662,7 @@ const addReagentLedger = () => {
     time: '2026-07-12T09:00',
     type: '普通试剂',
     remark: '',
+    supplier: '',
   }
   showReagentEntryForm.value = false
 }
@@ -4603,7 +4976,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 <tbody>
                   <tr v-for="record in retainRecords" :key="record.retainRecordId ?? record.sampleNo" :class="{ 'retain-approval-row': canApproveRetain(record) }">
                     <td>{{ record.retainRecordId ?? '历史留样' }}</td><td>{{ displaySampleNo(record) }}</td><td>{{ record.sampleName }}</td><td><div class="retain-location-cell"><b>{{ record.warehouseNo }}仓</b><span>{{ (record.cargoPosition ?? `${record.warehouseNo}仓1号货位`).replace(`${record.warehouseNo}仓`, '') }}</span></div></td><td>{{ (record.receiveTime ?? record.samplingDate).slice(0, 10) }}</td><td>{{ record.retainSpecification ?? record.packageType ?? '—' }}</td><td>{{ retainCountWithUnit(record) }}</td><td><div :class="['retain-expire-progress', retainStatusLevel(record)]"><div class="retain-expire-progress-meta"><span>{{ retainExpireDate(record) }}</span><b>{{ retainExpireStatus(record) }}</b></div><div class="retain-expire-progress-track" role="progressbar" :aria-valuenow="retainExpireProgress(record)" aria-valuemin="0" aria-valuemax="100"><i :style="{ width: `${retainExpireProgress(record)}%` }"></i></div></div></td><td><div class="retain-state-stack"><span :class="['retain-status-badge', retainLifecycleTone(record)]"><PackageCheck :size="12" /> {{ retainLifecycleStatus(record) }}</span><span :class="['sampling-status', { 'retain-approval-reminder': canApproveRetain(record) }]">{{ canApproveRetain(record) ? `待您审批 · ${retainWorkflowStatusText(record)}` : retainWorkflowStatusText(record) }}</span></div></td><td>{{ record.retainHandlingMethod ?? '留存' }}</td><td>{{ record.retainDisposalTime || '—' }}</td>
-                    <td><div class="sampling-actions retain-row-actions"><button v-if="record.retainRecordId" type="button" @click="openRetainApprovalFlow(record)"><Route :size="13" /> 审批流程</button><button v-if="record.retainApprovalStatus === '退回修改'" type="button" @click="openRetainEditForm(record)"><Edit3 :size="13" /> 修改并送审</button><button v-if="canStartDestroyFromRetain(record)" class="retain-destroy-action" type="button" @click="startDestroyFromRetain(record)"><Trash2 :size="13" /> 销样</button><button v-if="canApproveRetain(record)" class="retain-quick-approve" type="button" @click="approveRetainRecord('pass', record)"><CheckCircle2 :size="13" /> {{ record.retainApprovalStep === '确认留样' ? '确认留样' : '同意' }}</button><button v-if="canApproveRetain(record)" class="retain-quick-reject" type="button" @click="approveRetainRecord('return', record)"><CornerDownLeft :size="13" /> 拒绝</button></div></td>
+                    <td><div class="sampling-actions retain-row-actions"><button v-if="record.retainRecordId" type="button" @click="openRetainApprovalFlow(record)"><Route :size="13" /> 审批流程</button><button v-if="record.retainApprovalStatus === '退回修改'" type="button" @click="openRetainEditForm(record)"><Edit3 :size="13" /> 修改并送审</button><button v-if="canStartDestroyFromRetain(record)" class="retain-destroy-action" type="button" @click="startDestroyFromRetain(record)"><Trash2 :size="13" /> 确认销样</button><button v-if="canApproveRetain(record)" class="retain-quick-approve" type="button" @click="approveRetainRecord('pass', record)"><CheckCircle2 :size="13" /> {{ record.retainApprovalStep === '确认留样' ? '确认留样' : '同意' }}</button><button v-if="canApproveRetain(record)" class="retain-quick-reject" type="button" @click="approveRetainRecord('return', record)"><CornerDownLeft :size="13" /> 拒绝</button></div></td>
                   </tr>
                   <tr v-if="!retainRecords.length"><td colspan="12">暂无留样数据，请在留样管理中独立登记。</td></tr>
                 </tbody>
@@ -4624,7 +4997,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 <thead><tr><th>销样编号</th><th>样品编号</th><th>样品名称</th><th>仓号</th><th>货位号</th><th>规格</th><th>品种</th><th>销样来源</th><th>审批状态</th><th>操作</th></tr></thead>
                 <tbody>
                   <tr v-for="record in destroyRecords" :key="record.destroyRecordId ?? record.sampleNo">
-                    <td>{{ record.destroyRecordId ?? '历史销样' }}</td><td>{{ displaySampleNo(record) }}</td><td>{{ record.sampleName }}</td><td>{{ record.warehouseNo }}仓</td><td>{{ (record.cargoPosition ?? `${record.warehouseNo}仓1号货位`).replace(`${record.warehouseNo}仓`, '') }}</td><td>{{ record.retainSpecification ?? record.packageType ?? record.sampleCount }}</td><td>{{ record.destroyVariety ?? record.grainType }}</td><td>{{ record.destroySource ?? (retainStatusLevel(record) === 'expired' ? '留样已过期自动转入' : '历史销样') }}</td><td><span :class="['sampling-status', { 'retain-approval-reminder': canApproveDestroy(record) }]">{{ canApproveDestroy(record) ? `待您审批 · ${record.destroyApprovalStep}` : record.destroyApprovalStep ? `${record.destroyApprovalStep}审批中` : record.destroyApprovalStatus ?? '历史销样' }}</span></td>
+                    <td>{{ record.destroyRecordId ?? '历史销样' }}</td><td>{{ displaySampleNo(record) }}</td><td>{{ record.sampleName }}</td><td>{{ record.warehouseNo }}仓</td><td>{{ (record.cargoPosition ?? `${record.warehouseNo}仓1号货位`).replace(`${record.warehouseNo}仓`, '') }}</td><td>{{ record.retainSpecification ?? record.packageType ?? record.sampleCount }}</td><td>{{ record.destroyVariety ?? record.grainType }}</td><td>{{ record.destroySource ?? (retainStatusLevel(record) === 'expired' ? '留样到期确认转入' : '历史销样') }}</td><td><span :class="['sampling-status', 'destroy-approval-status', destroyApprovalTone(record), { 'destroy-approval-current': canApproveDestroy(record) }]">{{ canApproveDestroy(record) ? `待您审批 · ${record.destroyApprovalStep}` : record.destroyApprovalStep ? `${record.destroyApprovalStep}审批中` : record.destroyApprovalStatus ?? '历史销样' }}</span></td>
                     <td><div class="sampling-actions destroy-row-actions"><button v-if="record.destroyRecordId" type="button" @click="openDestroyApprovalFlow(record)"><Route :size="13" /> 销样流程</button><button v-if="record.destroyApprovalStatus === '退回修改'" type="button" @click="openDestroyForm(record)"><Edit3 :size="13" /> 修改并送审</button><button v-if="canApproveDestroy(record)" class="retain-quick-approve" type="button" @click="approveDestroyRecord('pass', record)"><CheckCircle2 :size="13" /> {{ record.destroyApprovalStep === '确认销样' ? '确认销样' : '同意' }}</button><button v-if="canApproveDestroy(record)" class="retain-quick-reject" type="button" @click="approveDestroyRecord('return', record)"><CornerDownLeft :size="13" /> 拒绝</button><button v-if="!record.destroyRecordId" type="button" @click="openQualityResultView(record.sampleNo)"><Eye :size="13" /> 查看质检结果</button></div></td>
                   </tr>
                   <tr v-if="!destroyRecords.length"><td colspan="10">暂无销样数据，请先选择已留样样品新增销样登记。</td></tr>
@@ -4660,7 +5033,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
 
                   <table v-else-if="inspectionOverviewDrilldown === 'retain'" class="sampling-table"><thead><tr><th>报告编号</th><th>样品编号</th><th>样品名称</th><th>仓号</th><th>品种</th><th>留样数量</th><th>留样时间</th><th>过期时间</th><th>到期状态</th></tr></thead><tbody><tr v-for="record in inspectionOverviewRows" :key="record.sampleNo"><td>{{ record.reportNo ?? '—' }}</td><td>{{ displaySampleNo(record) }}</td><td>{{ record.sampleName }}</td><td>{{ record.warehouseNo }}仓</td><td>{{ record.grainType }}</td><td>{{ retainCountWithUnit(record) }}</td><td>{{ record.retainTime ?? ledgerHandleTime(record) }}</td><td>{{ retainExpireDate(record) }}</td><td><span :class="['retain-expire-status', retainStatusLevel(record)]">{{ retainExpireStatus(record) }}</span></td></tr><tr v-if="!inspectionOverviewRows.length"><td colspan="9">暂无符合筛选条件的留样信息。</td></tr></tbody></table>
 
-                  <table v-else class="sampling-table"><thead><tr><th>报告编号</th><th>样品编号</th><th>样品名称</th><th>仓号</th><th>品种</th><th>不合格项</th><th>销样来源</th><th>销样时间</th></tr></thead><tbody><tr v-for="record in inspectionOverviewRows" :key="record.sampleNo"><td>{{ record.reportNo ?? '—' }}</td><td>{{ displaySampleNo(record) }}</td><td>{{ record.sampleName }}</td><td>{{ record.warehouseNo }}仓</td><td>{{ record.grainType }}</td><td>{{ reportUnqualifiedCount(record) }} 项</td><td>{{ retainStatusLevel(record) === 'expired' ? '留样到期转入' : record.approvalStatus }}</td><td>{{ record.destroyTime ?? ledgerHandleTime(record) }}</td></tr><tr v-if="!inspectionOverviewRows.length"><td colspan="8">暂无符合筛选条件的销样信息。</td></tr></tbody></table>
+                  <table v-else class="sampling-table"><thead><tr><th>报告编号</th><th>样品编号</th><th>样品名称</th><th>仓号</th><th>品种</th><th>不合格项</th><th>销样来源</th><th>销样时间</th></tr></thead><tbody><tr v-for="record in inspectionOverviewRows" :key="record.sampleNo"><td>{{ record.reportNo ?? '—' }}</td><td>{{ displaySampleNo(record) }}</td><td>{{ record.sampleName }}</td><td>{{ record.warehouseNo }}仓</td><td>{{ record.grainType }}</td><td>{{ reportUnqualifiedCount(record) }} 项</td><td>{{ retainStatusLevel(record) === 'expired' ? '确认销样后转入' : record.approvalStatus }}</td><td>{{ record.destroyTime ?? ledgerHandleTime(record) }}</td></tr><tr v-if="!inspectionOverviewRows.length"><td colspan="8">暂无符合筛选条件的销样信息。</td></tr></tbody></table>
                 </div>
               </div>
             </section>
@@ -4677,10 +5050,23 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             </div>
 
             <div class="warning-rule-cards">
-              <div><b>正常质量检验</b><strong>{{ qualityWarningStats.normal }} 条</strong><span>关键 0 项、普通 0 项</span></div>
-              <div><b>一级预警</b><strong>{{ qualityWarningStats.level1 }} 条</strong><span>关键 ≥2 项，或 1 项关键 + ≥2 项普通</span></div>
-              <div><b>二级预警</b><strong>{{ qualityWarningStats.level2 }} 条</strong><span>普通 ≥3 项，或 1 项关键 + 0-1 项普通</span></div>
-              <div><b>三级预警</b><strong>{{ qualityWarningStats.level3 }} 条</strong><span>普通 1-2 项不合格</span></div>
+              <div class="normal"><b>正常质量检验</b><strong>{{ qualityWarningStats.normal }} 条</strong><span>未触发质量预警</span></div>
+              <div class="level1"><b>一级预警</b><strong>{{ qualityWarningStats.level1 }} 条</strong><span>严重质量风险，优先处置</span></div>
+              <div class="level2"><b>二级预警</b><strong>{{ qualityWarningStats.level2 }} 条</strong><span>较高质量风险，及时复核</span></div>
+              <div class="level3"><b>三级预警</b><strong>{{ qualityWarningStats.level3 }} 条</strong><span>一般质量风险，持续关注</span></div>
+            </div>
+
+            <div class="warning-filter-panel">
+              <div class="warning-filter-tags" aria-label="预警等级筛选">
+                <button v-for="tag in warningLevelTags" :key="tag.key" :class="['warning-filter-tag', tag.key, { active: warningLevelFilter === tag.key }]" type="button" @click="warningLevelFilter = tag.key"><span>{{ tag.label }}</span><b>{{ tag.count }}</b></button>
+              </div>
+              <div class="warning-filter-fields">
+                <label class="warning-keyword-filter"><Search :size="14" /><input v-model="warningFilters.keyword" placeholder="样品编号、名称或报告编号" /></label>
+                <select v-model="warningFilters.warehouseNo"><option value="">全部仓号</option><option v-for="warehouseNo in warningWarehouseOptions" :key="warehouseNo" :value="warehouseNo">{{ warehouseNo }}仓</option></select>
+                <select v-model="warningFilters.reason"><option value="">全部检验事由</option><option v-for="reason in warningReasonOptions" :key="reason" :value="reason">{{ reason }}</option></select>
+                <label class="warning-date-filter"><span>预警日期</span><input v-model="warningFilters.date" type="date" /></label>
+                <button class="warning-filter-reset" type="button" @click="resetWarningFilters"><RotateCcw :size="14" /> 重置</button>
+              </div>
             </div>
 
             <div class="sampling-table-card warning-record-table-card">
@@ -4693,30 +5079,28 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     <th>样品名称</th>
                     <th>仓号</th>
                     <th>品种</th>
-                    <th>关键项</th>
-                    <th>普通项</th>
-                    <th>不合格项数</th>
-                    <th>不合格内容</th>
+                    <th>检验事由</th>
+                    <th>不合格项目数量</th>
+                    <th>预警时间</th>
                     <th>判定说明</th>
                     <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="item in qualityWarningRecords" :key="item.record.sampleNo">
+                  <tr v-for="item in filteredQualityWarningRecords" :key="item.record.sampleNo">
                     <td><span :class="['warning-level-badge', item.risk.code === 'level1' ? 'alarm' : item.risk.code === 'level2' ? 'warning' : 'level3']">{{ item.level }}</span></td>
                     <td>{{ item.record.reportNo ?? '—' }}</td>
                     <td>{{ displaySampleNo(item.record) }}</td>
                     <td>{{ item.record.sampleName }}</td>
                     <td>{{ normalizedCargoPosition(item.record) }}</td>
                     <td>{{ item.record.grainType }}</td>
-                    <td>{{ item.risk.keyCount }} 项</td>
-                    <td>{{ item.risk.normalCount }} 项</td>
-                    <td><button class="unqualified-count-btn" type="button" @click="openUnqualifiedItems(item.record.sampleNo)">{{ item.count }} 项</button></td>
-                    <td><button class="unqualified-detail-link" type="button" @click="openUnqualifiedItems(item.record.sampleNo)">查看不合格项</button></td>
+                    <td>{{ item.record.reason }}</td>
+                    <td><button class="unqualified-count-btn" type="button" @click="openUnqualifiedItems(item.record.sampleNo)"><Eye :size="13" /> {{ item.count }} 项</button></td>
+                    <td>{{ item.warningTime }}</td>
                     <td>{{ item.status }}</td>
                     <td><div class="sampling-actions"><button v-if="reportHasFormalReport(item.record)" type="button" @click="openReportView(item.record.sampleNo)"><BookOpenText :size="13" /> 查看质检报告</button><button v-else type="button" @click="openQualityResultView(item.record.sampleNo)"><Eye :size="13" /> 查看质检结果</button></div></td>
                   </tr>
-                  <tr v-if="!qualityWarningRecords.length"><td colspan="12">暂无质量预警记录，当前检验报告均为正常质量检验。</td></tr>
+                  <tr v-if="!filteredQualityWarningRecords.length"><td colspan="11">暂无符合筛选条件的质量预警记录。</td></tr>
                 </tbody>
               </table>
             </div>
@@ -4969,31 +5353,33 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
         <section v-else-if="activeMenu === 'lab'" class="inspection-page">
           <div class="lab-page">
             <div class="lab-hero">
-              <div><span>检化验室数字化</span><h2>仪器管理与温湿度自动采集</h2></div>
+              <div><span>检化验室数字化</span><h2>检化验室管理</h2></div>
               <div class="lab-stat-grid"><div v-for="item in labStats" :key="item.label" :class="['lab-stat-card', item.tone]"><b>{{ item.value }}</b><span>{{ item.label }}</span></div></div>
             </div>
 
             <div class="inspection-tabs lab-module-tabs">
-              <button type="button" :class="{ active: labTab === 'ledger' }" @click="labTab = 'ledger'">仪器台账与温湿度</button>
-              <button type="button" :class="{ active: labTab === 'calibration' }" @click="labTab = 'calibration'">检定校准记录</button>
-              <button type="button" :class="{ active: labTab === 'maintenance' }" @click="labTab = 'maintenance'">维护保养记录</button>
+              <button type="button" :class="{ active: labTab === 'ledger' }" @click="labTab = 'ledger'">检化验仪器台账</button>
+              <button type="button" :class="{ active: labTab === 'environment' }" @click="labTab = 'environment'">检化验室温湿度采集</button>
+              <button type="button" :class="{ active: labTab === 'calibration' }" @click="labTab = 'calibration'">仪器检定校准记录</button>
+              <button type="button" :class="{ active: labTab === 'maintenance' }" @click="labTab = 'maintenance'">仪器维护保养记录</button>
             </div>
 
-            <div v-if="labTab === 'ledger'" class="lab-main-grid lab-ledger-grid">
+            <div v-if="labTab === 'ledger'" class="lab-ledger-module">
               <section class="lab-panel instrument-panel">
-                <div class="lab-panel-head"><div><h3>检化验仪器台账</h3><span>按设备类型汇总当前库区仪器数量</span></div><button type="button" @click="showInstrumentCategoryForm = true"><Plus :size="13" /> 新增设备类别</button></div>
+                <div class="lab-panel-head"><div><h3>检化验仪器台账</h3><span>点击设备类别查看对应仪器明细</span></div><button type="button" @click="showInstrumentCategoryForm = true"><Plus :size="13" /> 新增设备类别</button></div>
                 <div class="instrument-type-grid">
-                  <article v-for="item in labInstrumentTypeSummary" :key="item.type" :class="['instrument-type-card', { active: activeInstrumentType === item.type }]" @click="activeInstrumentType = item.type">
-                    <span>{{ item.type }}</span>
-                    <b>{{ item.count }}</b>
-                    <div><em>在用 {{ item.running }}</em><em :class="{ warn: item.warning > 0 }">临期/异常 {{ item.warning }}</em></div>
-                    <small>{{ item.description }}</small>
-                  </article>
+                  <button v-for="item in labInstrumentTypeSummary" :key="item.type" :class="['instrument-type-card', instrumentTypeTone(item.type), { active: activeInstrumentType === item.type }]" type="button" @click="activeInstrumentType = item.type">
+                    <span class="instrument-type-icon"><component :is="instrumentTypeIcon(item.type)" :size="18" /></span>
+                    <span class="instrument-type-name">{{ item.type }}</span>
+                    <b>{{ item.count }}<small>台</small></b>
+                    <div class="instrument-type-meta"><em>在用 {{ item.running }}</em><em :class="{ warn: item.warning > 0 }">异常 {{ item.warning }}</em></div>
+                  </button>
                 </div>
                 <section class="custodian-instrument-section">
-                  <div class="section-subhead"><div><h4>仪器明细</h4><span>{{ activeInstrumentType }} 共 {{ activeInstrumentTypeRows.length }} 台</span></div><button type="button" class="secondary-action" @click="resetInstrumentEntryForm(); instrumentEntryForm.type = activeInstrumentType; showInstrumentEntryForm = true">新增仪器</button></div>
+                  <div class="section-subhead"><div><h4>{{ activeInstrumentType }}仪器明细</h4><span>点击设备类别卡片切换 · 共 {{ activeInstrumentTypeRows.length }} 台</span></div><button type="button" class="secondary-action" @click="resetInstrumentEntryForm(); instrumentEntryForm.type = activeInstrumentType; showInstrumentEntryForm = true">新增仪器</button></div>
                   <div class="instrument-detail-scroll">
                     <table class="lab-table instrument-detail-table">
+                      <colgroup><col class="instrument-code-col" /><col class="instrument-name-col" /><col class="instrument-model-col" /><col class="instrument-location-col" /><col class="instrument-custodian-col" /><col class="instrument-calibration-col" /><col class="instrument-progress-col" /><col class="instrument-status-col" /></colgroup>
                       <thead>
                         <tr>
                           <th>仪器编号</th>
@@ -5020,53 +5406,36 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                               <i><b :class="calibrationStatus(item).tone" :style="{ width: `${calibrationProgress(item)}%` }"></b></i>
                             </div>
                           </td>
-                          <td><span :class="['lab-status', calibrationStatus(item).tone]">{{ item.status }}</span></td>
+                          <td><span :class="['lab-status', instrumentStatusTone(item)]">{{ item.status }}</span></td>
                         </tr>
+                        <tr v-if="!activeInstrumentTypeRows.length"><td colspan="8">该设备类别下暂无仪器，请新增仪器台账。</td></tr>
                       </tbody>
                     </table>
                   </div>
                 </section>
               </section>
 
-              <section class="lab-panel env-panel">
-                <div class="lab-panel-head"><div><h3>温湿度自动采集</h3><span>按区域与时间维度查看历史采集数据</span></div></div>
-                <div class="env-filter-row">
-                  <div class="env-range-tabs">
-                    <button v-for="range in environmentRanges" :key="range.key" type="button" :class="{ active: activeEnvironmentRange === range.key }" @click="activeEnvironmentRange = range.key">{{ range.label }}</button>
-                  </div>
-                </div>
-                <div class="env-gauge-row"><div><b>{{ environmentAvgTemperature }}</b><span>实时平均温度</span><small>{{ environmentRealtimeTime }} · 每半小时更新</small></div><div><b>{{ environmentAvgHumidity }}</b><span>实时平均湿度</span><small>{{ environmentRealtimeTime }} · 每半小时更新</small></div><div><b>{{ environmentWarningCount }}</b><span>实时异常记录</span><small>{{ environmentRealtimeTime }} · 自动标注</small></div></div>
-                <div class="env-trend-chart">
-                  <div class="chart-legend"><span class="temp">温度</span><span class="humidity">湿度</span></div>
-                  <div v-if="hoveredEnvironmentPoint" class="chart-tooltip">{{ hoveredEnvironmentPoint.label }} · {{ formatEnvironmentTooltipDate(activeEnvironmentRange, hoveredEnvironmentPoint.date) }} · 温度 {{ hoveredEnvironmentPoint.temperature }}℃ · 湿度 {{ hoveredEnvironmentPoint.humidity }}%</div>
-                  <svg :viewBox="`0 0 ${environmentChartWidth} ${environmentChartHeight}`" role="img" aria-label="温湿度趋势图">
-                    <line :x1="environmentChartPaddingX" :y1="environmentChartPaddingY" :x2="environmentChartPaddingX" :y2="environmentChartLabelY - 30" />
-                    <line :x1="environmentChartPaddingX" :y1="environmentChartLabelY - 30" :x2="environmentChartWidth - environmentChartPaddingX" :y2="environmentChartLabelY - 30" />
-                    <template v-for="(point, index) in environmentChartRows" :key="`${point.date}-${point.label}-axis`">
-                      <line class="chart-x-guide" :x1="point.x" :y1="environmentChartPaddingY" :x2="point.x" :y2="environmentChartLabelY - 30" />
-                      <text v-if="showEnvironmentAxisLabel(index, environmentChartRows.length)" class="chart-axis-text" :x="point.x" :y="environmentChartLabelY" text-anchor="middle">{{ point.label }}</text>
-                    </template>
-                    <polyline class="temperature-line" :points="environmentTemperaturePoints" />
-                    <polyline class="humidity-line" :points="environmentHumidityPoints" />
-                    <template v-for="point in environmentChartRows" :key="`${point.date}-${point.label}`">
-                      <circle class="temperature-dot" r="4" v-bind="environmentPointPosition(point, 'temperature')" @mouseenter="hoveredEnvironmentPoint = point" @mouseleave="hoveredEnvironmentPoint = null" />
-                      <circle class="humidity-dot" r="4" v-bind="environmentPointPosition(point, 'humidity')" @mouseenter="hoveredEnvironmentPoint = point" @mouseleave="hoveredEnvironmentPoint = null" />
-                    </template>
-                  </svg>
-                </div>
-                <div class="env-status-row">
-                  <label>区域筛选<select v-model="activeEnvironmentArea"><option>全部区域</option><option v-for="area in environmentAreas" :key="area">{{ area }}</option></select></label>
-                  <span>状态筛选</span>
-                  <div class="env-alarm-tabs">
-                    <button v-for="item in environmentAlarmTypes" :key="item.key" type="button" :class="{ active: activeEnvironmentAlarmType === item.key }" @click="activeEnvironmentAlarmType = item.key">{{ item.label }}</button>
-                  </div>
-                </div>
-                <div class="env-record-list"><div v-for="item in environmentDisplayRecords" :key="`${item.area}-${item.time}`"><span>{{ item.time }}</span><b>{{ item.area }}</b><em>{{ item.temperature }}℃ / {{ item.humidity }}%</em><strong :class="{ warn: item.status !== '正常' }">{{ item.status }}</strong></div></div>
-              </section>
             </div>
 
+            <section v-else-if="labTab === 'environment'" class="lab-panel lab-single-module env-panel environment-module">
+                <div class="lab-panel-head"><div><h3>检化验室温湿度采集</h3></div><button type="button" @click="showEnvironmentTrendDialog = true"><ChartNoAxesCombined :size="14" /> 查看趋势图</button></div>
+                <section class="environment-live-section">
+                  <div class="environment-live-head"><div><i></i><b>实时温湿度</b></div><div class="environment-live-summary"><span>平均温度 <b>{{ environmentAvgTemperature }}</b></span><span>平均湿度 <b>{{ environmentAvgHumidity }}</b></span><span>异常 <b>{{ environmentWarningCount }}</b></span></div></div>
+                  <div class="environment-live-grid">
+                    <div v-for="item in realtimeEnvironmentRecords" :key="item.area" class="environment-live-item"><div><b>{{ item.area }}</b><span>{{ item.time }}</span></div><strong><small>温度</small>{{ item.temperature }}℃</strong><strong><small>湿度</small>{{ item.humidity }}%</strong><em :class="['lab-status', environmentStatusTone(item.status)]">{{ item.status }}</em></div>
+                  </div>
+                </section>
+                <div class="environment-detail-toolbar">
+                  <div class="env-range-tabs"><button v-for="range in environmentRanges" :key="range.key" type="button" :class="{ active: activeEnvironmentRange === range.key }" @click="activeEnvironmentRange = range.key">{{ range.label }}</button></div>
+                  <label>区域<select v-model="activeEnvironmentArea"><option>全部区域</option><option v-for="area in environmentAreas" :key="area">{{ area }}</option></select></label>
+                  <label>状态<select v-model="activeEnvironmentAlarmType"><option v-for="item in environmentAlarmTypes" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
+                </div>
+                <div class="environment-detail-head"><div><h4>{{ activeEnvironmentRangeLabel }}采集明细</h4><span>{{ activeEnvironmentArea }} · {{ environmentAlarmTypes.find((item) => item.key === activeEnvironmentAlarmType)?.label }}</span></div><b>{{ environmentDisplayRecords.length }} 条</b></div>
+                <div class="environment-detail-table-wrap"><table class="lab-table environment-detail-table"><colgroup><col class="environment-time-col" /><col class="environment-area-col" /><col class="environment-value-col" /><col class="environment-value-col" /><col class="environment-status-col" /></colgroup><thead><tr><th>采集时间</th><th>采集区域</th><th>温度</th><th>湿度</th><th>状态</th></tr></thead><tbody><tr v-for="item in environmentDisplayRecords" :key="`${item.area}-${item.time}`"><td>{{ item.time }}</td><td>{{ item.area }}</td><td><b>{{ item.temperature }}℃</b></td><td><b>{{ item.humidity }}%</b></td><td><span :class="['lab-status', environmentStatusTone(item.status)]">{{ item.status }}</span></td></tr><tr v-if="!environmentDisplayRecords.length"><td colspan="5">当前筛选条件下暂无温湿度采集记录。</td></tr></tbody></table></div>
+              </section>
+
             <section v-else-if="labTab === 'calibration'" class="lab-panel lab-single-module calibration-module">
-              <div class="lab-panel-head"><div><h3>检定校准记录</h3><span>由仪器台账自动生成检定计划，并沉淀每台设备的检定历史</span></div></div>
+              <div class="lab-panel-head"><div><h3>仪器检定校准记录</h3><span>由仪器台账自动生成检定计划，并沉淀每台设备的检定历史</span></div></div>
               <div class="calibration-summary-grid">
                 <div v-for="item in calibrationStats" :key="item.label" :class="['calibration-summary-card', item.tone]"><b>{{ item.value }}</b><span>{{ item.label }}</span></div>
               </div>
@@ -5088,7 +5457,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                         </tr>
                       </thead>
                       <tbody>
-                        <tr v-for="item in calibrationPlanRows" :key="item.code" :class="{ active: selectedCalibrationInstrumentCode === item.code }" @click="selectedCalibrationInstrumentCode = item.code">
+                        <tr v-for="item in calibrationPlanRows" :key="item.code" :class="{ active: selectedCalibrationInstrumentCode === item.code }" @click="openCalibrationHistory(item.code)">
                           <td>{{ item.instrument }}</td>
                           <td>{{ item.code }}</td>
                           <td>{{ item.type }}</td>
@@ -5101,43 +5470,18 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                             </div>
                           </td>
                           <td><span :class="['lab-status', item.statusTone]">{{ item.statusLabel }}</span></td>
-                          <td><button type="button" class="secondary-link" @click.stop="selectedCalibrationInstrumentCode = item.code">查看</button></td>
+                          <td><button type="button" class="secondary-link" @click.stop="openCalibrationHistory(item.code)">查看</button></td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
                 </section>
 
-                <section class="calibration-history-panel">
-                  <div class="section-subhead"><div><h4>{{ selectedCalibrationInstrument?.name ?? '检定历史' }}</h4><span>{{ selectedCalibrationInstrument?.code ?? '请先选择仪器' }}</span></div><span>{{ selectedCalibrationHistoryRows.length }} 条</span></div>
-                  <div v-if="selectedCalibrationInstrument" class="calibration-detail-card">
-                    <div><b>{{ selectedCalibrationInstrument.name }}</b><span>{{ selectedCalibrationInstrument.type }}</span></div>
-                    <div class="calibration-detail-grid">
-                      <div><span>仪器编号</span><b>{{ selectedCalibrationInstrument.code }}</b></div>
-                      <div><span>当前位置</span><b>{{ selectedCalibrationInstrument.location }}</b></div>
-                      <div><span>责任人</span><b>{{ selectedCalibrationInstrument.custodian }}</b></div>
-                      <div><span>当前下次检定</span><b>{{ selectedCalibrationInstrument.calibration }}</b></div>
-                    </div>
-                  </div>
-                  <div class="calibration-history-list">
-                    <article v-for="record in selectedCalibrationHistoryRows" :key="record.recordNo" :class="['calibration-history-item', { current: record.recordNo.endsWith('-CURRENT') }]">
-                      <div class="calibration-history-main">
-                        <b>{{ record.actualDate }}</b>
-                        <span>计划 {{ record.planDate }}</span>
-                      </div>
-                      <div class="calibration-history-meta">
-                        <span>{{ record.agency }}</span>
-                        <em>{{ record.result }}</em>
-                      </div>
-                      <strong>{{ record.certificate }}</strong>
-                    </article>
-                  </div>
-                </section>
               </div>
             </section>
 
-            <section v-else class="lab-panel lab-single-module">
-              <div class="lab-panel-head"><div><h3>维护保养记录</h3><span>清洁、维护、故障处理和保养计划闭环管理</span></div></div>
+            <section v-else-if="labTab === 'maintenance'" class="lab-panel lab-single-module">
+              <div class="lab-panel-head"><div><h3>仪器维护保养记录</h3><span>清洁、维护、故障处理和保养计划闭环管理</span></div></div>
               <div class="maintenance-scroll">
                 <table class="lab-table maintenance-table">
                   <thead><tr><th>仪器名称</th><th>仪器编号</th><th>上次维护</th><th>下次维护</th><th>维护类型</th><th>处理人</th><th>剩余天数</th><th>维护进度</th><th>状态</th><th>操作</th></tr></thead>
@@ -5167,6 +5511,52 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            </section>
+          </div>
+
+          <div v-if="showCalibrationHistoryDialog && selectedCalibrationInstrument" class="process-dialog-mask" @click.self="showCalibrationHistoryDialog = false">
+            <section class="calibration-history-dialog">
+              <div class="process-dialog-head"><div><h2>仪器检定校准历史</h2><span>{{ selectedCalibrationInstrument.name }} · {{ selectedCalibrationInstrument.code }}</span></div><button type="button" @click="showCalibrationHistoryDialog = false"><X :size="14" /> 关闭</button></div>
+              <div class="calibration-history-dialog-body">
+                <div class="calibration-detail-card">
+                  <div><b>{{ selectedCalibrationInstrument.name }}</b><span>{{ selectedCalibrationInstrument.type }}</span></div>
+                  <div class="calibration-detail-grid">
+                    <div><span>仪器编号</span><b>{{ selectedCalibrationInstrument.code }}</b></div>
+                    <div><span>当前位置</span><b>{{ selectedCalibrationInstrument.location }}</b></div>
+                    <div><span>责任人</span><b>{{ selectedCalibrationInstrument.custodian }}</b></div>
+                    <div><span>当前下次检定</span><b>{{ selectedCalibrationInstrument.calibration }}</b></div>
+                  </div>
+                </div>
+                <div class="calibration-history-dialog-head"><div><h3>检定历史记录</h3><span>当前计划与历次检定结果</span></div><b>{{ selectedCalibrationHistoryRows.length }} 条</b></div>
+                <div class="calibration-history-list">
+                  <article v-for="record in selectedCalibrationHistoryRows" :key="record.recordNo" :class="['calibration-history-item', { current: record.recordNo.endsWith('-CURRENT') }]">
+                    <div class="calibration-history-main"><b>{{ record.actualDate }}</b><span>计划 {{ record.planDate }}</span></div>
+                    <div class="calibration-history-meta"><span>{{ record.agency }}</span><em>{{ record.result }}</em></div>
+                    <strong>{{ record.certificate }}</strong>
+                  </article>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div v-if="showEnvironmentTrendDialog" class="process-dialog-mask" @click.self="showEnvironmentTrendDialog = false">
+            <section class="environment-trend-dialog">
+              <div class="process-dialog-head"><div><h2>检化验室温湿度趋势</h2><span>{{ activeEnvironmentRangeLabel }} · {{ activeEnvironmentArea }}</span></div><button type="button" @click="showEnvironmentTrendDialog = false"><X :size="14" /> 关闭</button></div>
+              <div class="environment-trend-dialog-body">
+                <div class="environment-trend-toolbar"><div class="env-range-tabs"><button v-for="range in environmentRanges" :key="range.key" type="button" :class="{ active: activeEnvironmentRange === range.key }" @click="activeEnvironmentRange = range.key">{{ range.label }}</button></div><label>区域<select v-model="activeEnvironmentArea"><option>全部区域</option><option v-for="area in environmentAreas" :key="area">{{ area }}</option></select></label></div>
+                <div class="environment-trend-summary"><span>统计维度 <b>{{ activeEnvironmentRangeLabel }}</b></span><span>平均温度 <b>{{ environmentTrendAvgTemperature }}</b></span><span>平均湿度 <b>{{ environmentTrendAvgHumidity }}</b></span></div>
+                <div class="env-trend-chart environment-popup-chart">
+                  <div class="chart-legend"><span class="temp">温度</span><span class="humidity">湿度</span></div>
+                  <div v-if="hoveredEnvironmentPoint" class="chart-tooltip">{{ hoveredEnvironmentPoint.label }} · {{ formatEnvironmentTooltipDate(activeEnvironmentRange, hoveredEnvironmentPoint.date) }} · 温度 {{ hoveredEnvironmentPoint.temperature }}℃ · 湿度 {{ hoveredEnvironmentPoint.humidity }}%</div>
+                  <svg :viewBox="`0 0 ${environmentChartWidth} ${environmentChartHeight}`" role="img" aria-label="检化验室温湿度趋势图">
+                    <line :x1="environmentChartPaddingX" :y1="environmentChartPaddingY" :x2="environmentChartPaddingX" :y2="environmentChartLabelY - 30" />
+                    <line :x1="environmentChartPaddingX" :y1="environmentChartLabelY - 30" :x2="environmentChartWidth - environmentChartPaddingX" :y2="environmentChartLabelY - 30" />
+                    <template v-for="(point, index) in environmentChartRows" :key="`${point.date}-${point.label}-axis`"><line class="chart-x-guide" :x1="point.x" :y1="environmentChartPaddingY" :x2="point.x" :y2="environmentChartLabelY - 30" /><text v-if="showEnvironmentAxisLabel(index, environmentChartRows.length)" class="chart-axis-text" :x="point.x" :y="environmentChartLabelY" text-anchor="middle">{{ point.label }}</text></template>
+                    <polyline class="temperature-line" :points="environmentTemperaturePoints" /><polyline class="humidity-line" :points="environmentHumidityPoints" />
+                    <template v-for="point in environmentChartRows" :key="`${point.date}-${point.label}`"><circle class="temperature-dot" r="4" v-bind="environmentPointPosition(point, 'temperature')" @mouseenter="hoveredEnvironmentPoint = point" @mouseleave="hoveredEnvironmentPoint = null" /><circle class="humidity-dot" r="4" v-bind="environmentPointPosition(point, 'humidity')" @mouseenter="hoveredEnvironmentPoint = point" @mouseleave="hoveredEnvironmentPoint = null" /></template>
+                  </svg>
+                </div>
               </div>
             </section>
           </div>
@@ -5231,52 +5621,69 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               <div class="lab-stat-grid"><div v-for="item in reagentStats" :key="item.label" :class="['lab-stat-card', item.tone]"><b>{{ item.value }}</b><span>{{ item.label }}</span></div></div>
             </div>
 
-            <div class="reagent-flow-strip">
-              <div v-for="item in reagentFlowSummary" :key="item.label">
-                <b>{{ item.value }}</b>
-                <span>{{ item.label }}</span>
-              </div>
-            </div>
-
             <div class="sampling-toolbar" style="margin-top:16px">
               <div class="sampling-source-tabs">
+                <button type="button" :class="{ active: reagentTab === 'overview' }" @click="reagentTab = 'overview'">试剂管理总览</button>
                 <button type="button" :class="{ active: reagentTab === 'inventory' }" @click="reagentTab = 'inventory'">试剂库存台账</button>
+                <button type="button" :class="{ active: reagentTab === 'cabinets' }" @click="reagentTab = 'cabinets'">试剂柜环境监测</button>
                 <button type="button" :class="{ active: reagentTab === 'records' }" @click="reagentTab = 'records'">过程留痕与审批</button>
               </div>
             </div>
 
-            <div v-if="reagentTab === 'inventory'" class="reagent-main-grid">
-              <section class="lab-panel">
+            <section v-if="reagentTab === 'overview'" class="reagent-overview-grid">
+              <section class="lab-panel reagent-overview-process">
+                <div class="lab-panel-head"><div><h3>流程数量总览</h3><span>采购、入库、领用、归还、盘点</span></div></div>
+                <div class="reagent-flow-strip"><button v-for="item in reagentFlowSummary" :key="item.label" :class="['reagent-flow-card', item.tone]" type="button" @click="openReagentFlowModule(item.label)"><b>{{ item.value }}</b><span>{{ item.label }}</span></button></div>
+              </section>
+              <section class="lab-panel reagent-overview-alerts">
+                <div class="lab-panel-head"><div><h3>低库存采购提醒</h3><span>需要优先关注的库存事项</span></div><button type="button" @click="reagentTab = 'inventory'">查看库存</button></div>
+                <div class="reagent-overview-alert-list"><div v-for="item in lowStockReagents" :key="`stock-${item.code}`"><b>低库存 · {{ item.name }}</b><span>当前 {{ item.stock }}{{ item.unit }} / 阈值 {{ item.threshold }}{{ item.unit }}</span></div><div v-if="!lowStockReagents.length">暂无低库存提醒</div></div>
+              </section>
+              <section class="lab-panel reagent-overview-cabinet-alerts">
+                <div class="lab-panel-head"><div><h3>柜温预警</h3><span>试剂柜环境不符合存放标准</span></div><button type="button" @click="reagentTab = 'cabinets'">查看试剂柜</button></div>
+                <div class="reagent-cabinet-alert-list"><button v-for="cabinet in reagentCabinets.filter((item) => reagentCabinetAlert(item))" :key="`cabinet-${cabinet.code}`" type="button" @click="openReagentCabinetHistory(cabinet)"><b>{{ cabinet.name }}</b><span>{{ reagentCabinetAlert(cabinet) }}</span></button><div v-if="!reagentCabinetAlertCount">当前无柜温预警</div></div>
+              </section>
+              <section class="lab-panel reagent-overview-approval">
+                <div class="lab-panel-head"><div><h3>待审批信息</h3><span>采购和领用审批待办</span></div></div>
+                <div class="reagent-overview-approval-list"><div v-for="item in reagentFlowRecords.filter((record) => record.approvalStatus === '审批中')" :key="item.recordNo"><b>{{ item.action }} · {{ item.reagentName }}</b><span>{{ item.approvalStep ?? '待审批' }} / {{ item.recordNo }}</span><button type="button" @click="openReagentApprovalFlow(item.recordNo)">查看</button></div><div v-if="!reagentFlowRecords.some((record) => record.approvalStatus === '审批中')">暂无待审批信息</div></div>
+              </section>
+            </section>
+
+            <section v-else-if="reagentTab === 'inventory'" class="lab-panel reagent-inventory-module">
                 <div class="lab-panel-head"><div><h3>试剂库存台账</h3></div><button type="button" @click="showReagentEntryForm = true"><Plus :size="13" /> 新增试剂台账</button></div>
                 <table class="lab-table reagent-table"><thead><tr><th>试剂编号</th><th>试剂名称</th><th>类别</th><th>规格</th><th>库存</th><th>预警阈值</th><th>试剂位置</th><th>保管人</th><th>状态</th></tr></thead><tbody><tr v-for="item in reagentStocks" :key="item.code"><td>{{ item.code }}</td><td>{{ item.name }}</td><td><span :class="['reagent-type', item.type === '易制毒试剂' ? 'danger' : 'normal']">{{ item.type }}</span></td><td>{{ item.spec }}</td><td><b :class="{ 'unqualified-text': item.stock <= item.threshold }">{{ item.stock }}{{ item.unit }}</b></td><td>{{ item.threshold }}{{ item.unit }}</td><td>{{ item.location }}</td><td>{{ item.keeper }}</td><td><span :class="['lab-status', item.stock <= item.threshold || item.type === '易制毒试剂' ? 'warn' : 'ok']">{{ item.status }}</span></td></tr></tbody></table>
+            </section>
+
+            <section v-else-if="reagentTab === 'cabinets'" class="lab-panel env-panel environment-module reagent-cabinet-module">
+              <div class="lab-panel-head"><div><h3>试剂柜环境监测</h3></div><button type="button" @click="showReagentCabinetTrendDialog = true"><ChartNoAxesCombined :size="14" /> 查看趋势图</button></div>
+              <section class="environment-live-section reagent-cabinet-live-section">
+                <div class="environment-live-head"><div><i></i><b>实时温湿度</b></div><div class="environment-live-summary"><span>平均温度 <b>{{ reagentCabinetAvgTemperature }}</b></span><span>平均湿度 <b>{{ reagentCabinetAvgHumidity }}</b></span><span>预警柜体 <b>{{ reagentCabinetAlertCount }}</b></span></div></div>
+                <div class="environment-live-grid reagent-cabinet-live-grid">
+                  <button v-for="item in reagentCabinetRealtimeRecords" :key="item.cabinetCode" type="button" :class="['environment-live-item', 'reagent-cabinet-live-item', { alert: item.status !== '正常' }]" @click="openReagentCabinetHistory(reagentCabinetByCode(item.cabinetCode))"><div><b>{{ item.cabinetName }}</b><span>{{ item.cabinetCode }} · {{ item.time }}</span></div><strong><small>温度</small>{{ item.temperature }}℃</strong><strong><small>湿度</small>{{ item.humidity }}%</strong><em :class="['lab-status', environmentStatusTone(item.status)]">{{ item.status }}</em></button>
+                </div>
               </section>
-
-              <aside class="reagent-side-stack">
-                <section class="lab-panel reagent-cabinet-panel">
-                  <div class="lab-panel-head"><div><h3>试剂柜环境监测</h3><span>自动轮播各试剂柜实时环境数据</span></div></div>
-                  <button v-if="activeReagentCabinet" type="button" class="reagent-cabinet-card" @click="openReagentCabinetHistory(activeReagentCabinet)">
-                    <div class="reagent-cabinet-card-head"><span :class="['reagent-type', activeReagentCabinet.type === '易制毒双人双锁柜' ? 'danger' : 'normal']">{{ activeReagentCabinet.type }}</span><b>{{ activeReagentCabinet.name }}</b></div>
-                    <div class="reagent-cabinet-metrics"><div><span>柜内温度</span><strong>{{ activeReagentCabinet.temperature }}℃</strong></div><div><span>柜内湿度</span><strong>{{ activeReagentCabinet.humidity }}%</strong></div></div>
-                    <small>采集时间：{{ activeReagentCabinet.sampledAt }}</small>
-                  </button>
-                  <div class="reagent-cabinet-dots"><button v-for="(cabinet, index) in reagentCabinets" :key="cabinet.code" type="button" :class="{ active: activeReagentCabinetIndex === index }" :title="cabinet.name" @click="activeReagentCabinetIndex = index"></button></div>
-                </section>
-
-                <section class="lab-panel">
-                  <div class="lab-panel-head"><div><h3>低库存采购提醒</h3><span>低于阈值时自动生成采购建议</span></div></div>
-                  <div class="purchase-alert-list"><div v-for="item in lowStockReagents" :key="item.code"><b>{{ item.name }}</b><span>{{ item.type }} / 当前 {{ item.stock }}{{ item.unit }}</span><em>建议采购 {{ Math.max(item.threshold * 2 - item.stock, item.threshold) }}{{ item.unit }}</em></div></div>
-                </section>
-              </aside>
-            </div>
+              <div class="environment-detail-toolbar reagent-cabinet-detail-toolbar">
+                <div class="env-range-tabs"><button v-for="range in environmentRanges" :key="range.key" type="button" :class="{ active: activeReagentCabinetRange === range.key }" @click="activeReagentCabinetRange = range.key">{{ range.label }}</button></div>
+                <label>试剂柜<select v-model="activeReagentCabinetFilter"><option>全部试剂柜</option><option v-for="cabinet in reagentCabinets" :key="cabinet.code" :value="cabinet.code">{{ cabinet.name }}</option></select></label>
+                <label>状态<select v-model="activeReagentCabinetAlarmType"><option v-for="item in environmentAlarmTypes" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
+              </div>
+              <div class="environment-detail-head"><div><h4>{{ activeReagentCabinetRangeLabel }}采集明细</h4><span>{{ activeReagentCabinetFilter === '全部试剂柜' ? '全部试剂柜' : reagentCabinets.find((cabinet) => cabinet.code === activeReagentCabinetFilter)?.name }} · {{ environmentAlarmTypes.find((item) => item.key === activeReagentCabinetAlarmType)?.label }}</span></div><b>{{ reagentCabinetDisplayRecords.length }} 条</b></div>
+              <div class="environment-detail-table-wrap reagent-cabinet-detail-table-wrap"><table class="lab-table environment-detail-table reagent-cabinet-detail-table"><colgroup><col class="environment-time-col" /><col class="reagent-cabinet-name-col" /><col class="environment-value-col" /><col class="environment-value-col" /><col class="reagent-cabinet-standard-col" /><col class="environment-status-col" /><col class="reagent-cabinet-action-col" /></colgroup><thead><tr><th>采集时间</th><th>试剂柜</th><th>温度</th><th>湿度</th><th>存放标准</th><th>状态</th><th>柜内试剂</th></tr></thead><tbody><tr v-for="item in reagentCabinetDisplayRecords" :key="`${item.cabinetCode}-${item.time}`"><td>{{ item.time }}</td><td><b>{{ item.cabinetName }}</b><span class="reagent-cabinet-code">{{ item.cabinetCode }}</span></td><td><b>{{ item.temperature }}℃</b></td><td><b>{{ item.humidity }}%</b></td><td>温度 {{ reagentCabinetStorageStandard(reagentCabinetByCode(item.cabinetCode)).temperature }}<br />湿度 {{ reagentCabinetStorageStandard(reagentCabinetByCode(item.cabinetCode)).humidity }}</td><td><span :class="['lab-status', environmentStatusTone(item.status)]">{{ item.status }}</span></td><td><button type="button" class="secondary-link" @click="openReagentCabinetHistory(reagentCabinetByCode(item.cabinetCode))">查看</button></td></tr><tr v-if="!reagentCabinetDisplayRecords.length"><td colspan="7">当前筛选条件下暂无试剂柜温湿度采集记录。</td></tr></tbody></table></div>
+            </section>
 
             <div v-if="reagentTab === 'records'" class="reagent-process-page">
               <div class="reagent-process-tabs">
                 <button v-for="tab in reagentProcessTabs" :key="tab" type="button" :class="{ active: reagentProcessTab === tab }" @click="reagentProcessTab = tab">{{ tab }}</button>
               </div>
 
-              <section v-if="reagentProcessTab === '入库'" class="lab-panel">
+              <section v-if="reagentProcessTab === '采购'" class="lab-panel">
+                <div class="lab-panel-head"><div><h3>采购申请</h3><span>新增采购信息后进入编制人、审核人、批准人审批</span></div><button type="button" @click="openReagentFlowForm('采购')"><Plus :size="13" /> 新增采购信息</button></div>
+                <div class="reagent-process-table-wrap"><table class="lab-table reagent-flow-table"><thead><tr><th>采购单号</th><th>试剂名称</th><th>数量</th><th>供应商</th><th>预计入库位置</th><th>申请时间</th><th>审批状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in reagentFlowRecords.filter((record) => record.action === '采购')" :key="item.recordNo"><td>{{ item.recordNo }}</td><td>{{ item.reagentName }}</td><td>{{ item.quantity }}{{ item.unit }}</td><td>{{ item.supplier }}</td><td>{{ item.location }}</td><td>{{ item.time }}</td><td><span :class="['lab-status', item.approvalStatus === '审批通过' ? 'ok' : 'warn']">{{ reagentProcessStatusText(item) }}</span></td><td><button type="button" class="reagent-flow-link" @click="openReagentApprovalFlow(item.recordNo)">审批流程</button><button v-if="item.approvalStatus === '审批通过'" type="button" class="reagent-flow-link" @click="openInboundFromProcurement(item)">生成入库单</button></td></tr><tr v-if="!reagentFlowRecords.some((record) => record.action === '采购')"><td colspan="8">暂无采购申请，请新增采购信息。</td></tr></tbody></table></div>
+              </section>
+
+              <section v-else-if="reagentProcessTab === '入库'" class="lab-panel">
                 <div class="lab-panel-head"><div><h3>入库登记</h3></div><button type="button" @click="openReagentFlowForm('入库')"><Plus :size="13" /> 新增入库</button></div>
-                <div class="reagent-process-table-wrap"><table class="lab-table reagent-flow-table"><thead><tr><th>入库时间</th><th>入库单号</th><th>试剂名称</th><th>数量</th><th>试剂位置</th><th>经办人</th><th>状态</th></tr></thead><tbody><tr v-for="item in reagentInboundRecords" :key="item.recordNo"><td>{{ item.time }}</td><td>{{ item.recordNo }}</td><td>{{ item.reagentName }}</td><td>{{ item.quantity }}{{ item.unit }}</td><td>{{ item.location }}</td><td>{{ item.handler }}</td><td><span class="lab-status ok">已入库</span></td></tr></tbody></table></div>
+                <div class="reagent-process-table-wrap"><table class="lab-table reagent-flow-table"><thead><tr><th>入库时间</th><th>入库单号</th><th>来源采购单</th><th>试剂名称</th><th>数量</th><th>试剂位置</th><th>经办人</th><th>状态</th></tr></thead><tbody><tr v-for="item in reagentInboundRecords" :key="item.recordNo"><td>{{ item.time }}</td><td>{{ item.recordNo }}</td><td>{{ item.sourceRecordNo ?? '直接入库' }}</td><td>{{ item.reagentName }}</td><td>{{ item.quantity }}{{ item.unit }}</td><td>{{ item.location }}</td><td>{{ item.handler }}</td><td><span class="lab-status ok">已入库</span></td></tr></tbody></table></div>
               </section>
 
               <section v-else-if="reagentProcessTab === '领用'" class="lab-panel">
@@ -5318,7 +5725,18 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             <section class="send-sample-dialog reagent-flow-dialog">
               <div class="process-dialog-head"><div><h2>{{ reagentFlowForm.action }}{{ reagentFlowForm.action === '领用' ? '申请' : '登记' }}</h2><span>{{ reagentFlowForm.action === '领用' ? '提交后按检验报告流程逐级审批' : reagentFlowForm.action === '归还' ? '自动带入领用信息，仅填写归还人、时间与归还数量' : '登记到货试剂及入库信息' }}</span></div><button type="button" @click="showReagentFlowForm = false"><X :size="12" /> 关闭</button></div>
               <div class="reagent-flow-form-body">
-                <template v-if="reagentFlowForm.action === '入库'">
+                <template v-if="reagentFlowForm.action === '采购'">
+                  <label>试剂编号<input v-model="reagentFlowForm.reagentCode" placeholder="如：SJ-PT-004" /></label>
+                  <label>试剂名称<input v-model="reagentFlowForm.name" placeholder="请输入采购试剂名称" /></label>
+                  <label>类别<select v-model="reagentFlowForm.type"><option>普通试剂</option><option>易制毒试剂</option></select></label>
+                  <label>规格<input v-model="reagentFlowForm.spec" placeholder="如：500ml/瓶" /></label>
+                  <label>采购数量<input v-model.number="reagentFlowForm.quantity" type="number" min="0" /></label>
+                  <label>单位<select v-model="reagentFlowForm.unit"><option>瓶</option><option>L</option><option>kg</option><option>g</option></select></label>
+                  <label>供应商<input v-model="reagentFlowForm.supplier" placeholder="请输入供应商" /></label>
+                  <label>预计入库位置<input v-model="reagentFlowForm.location" placeholder="如：普通试剂柜A01" /></label>
+                </template>
+
+                <template v-else-if="reagentFlowForm.action === '入库'">
                   <label>试剂编号<input v-model="reagentFlowForm.reagentCode" placeholder="如：SJ-PT-004" /></label>
                   <label>试剂名称<input v-model="reagentFlowForm.name" placeholder="请输入试剂名称" /></label>
                   <label>类别<select v-model="reagentFlowForm.type"><option>普通试剂</option><option>易制毒试剂</option></select></label>
@@ -5344,38 +5762,43 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                   <label>归还数量<input v-model.number="reagentFlowForm.quantity" type="number" min="1" step="1" /></label>
                 </template>
 
-                <label>{{ reagentFlowForm.action === '归还' ? '归还人' : '处理人' }}<input v-model="reagentFlowForm.handler" :placeholder="reagentFlowForm.action === '归还' ? '请输入归还人' : '请输入处理人'" /></label>
-                <label>{{ reagentFlowForm.action === '归还' ? '归还时间' : '操作时间' }}<input v-model="reagentFlowForm.time" type="datetime-local" /></label>
+                <label>{{ reagentFlowForm.action === '归还' ? '归还人' : reagentFlowForm.action === '采购' ? '申请人' : '处理人' }}<input v-model="reagentFlowForm.handler" :placeholder="reagentFlowForm.action === '归还' ? '请输入归还人' : reagentFlowForm.action === '采购' ? '请输入采购申请人' : '请输入处理人'" /></label>
+                <label>{{ reagentFlowForm.action === '归还' ? '归还时间' : reagentFlowForm.action === '采购' ? '申请时间' : '操作时间' }}<input v-model="reagentFlowForm.time" type="datetime-local" /></label>
                 <label v-if="reagentFlowForm.action !== '归还'" class="full">业务说明<textarea v-model="reagentFlowForm.remark" placeholder="请输入本次业务说明"></textarea></label>
-                <button type="button" @click="saveReagentFlow">{{ reagentFlowForm.action === '领用' ? '提交审批' : `确认${reagentFlowForm.action}` }}</button>
+                <button type="button" @click="saveReagentFlow">{{ reagentFlowForm.action === '领用' || reagentFlowForm.action === '采购' ? '提交审批' : `确认${reagentFlowForm.action}` }}</button>
               </div>
             </section>
           </div>
 
           <div v-if="showReagentCabinetHistory" class="process-dialog-mask" @click.self="showReagentCabinetHistory = false">
             <section class="reagent-cabinet-dialog">
-              <div class="process-dialog-head"><div><h2>{{ selectedReagentCabinet?.name }} 环境历史</h2><span>{{ selectedReagentCabinet?.type }} · 柜内温湿度变化</span></div><button type="button" @click="showReagentCabinetHistory = false"><X :size="12" /> 关闭</button></div>
+              <div class="process-dialog-head"><div><h2>{{ selectedReagentCabinet?.name }} 详情</h2><span>{{ selectedReagentCabinet?.type }} · 存放标准与柜内试剂</span></div><button type="button" @click="showReagentCabinetHistory = false"><X :size="12" /> 关闭</button></div>
               <div class="reagent-cabinet-history-body">
                 <div class="cabinet-history-summary"><div><span>当前温度</span><b>{{ selectedReagentCabinet?.temperature }}℃</b></div><div><span>当前湿度</span><b>{{ selectedReagentCabinet?.humidity }}%</b></div><div><span>最近采集</span><b>{{ selectedReagentCabinet?.sampledAt }}</b></div></div>
-                <div class="env-trend-chart cabinet-env-trend-chart">
+                <div v-if="selectedReagentCabinet" :class="['reagent-cabinet-standard-banner', { alert: Boolean(reagentCabinetAlert(selectedReagentCabinet)) }]"><div><b>{{ reagentCabinetAlert(selectedReagentCabinet) || '当前柜体环境符合存放标准' }}</b><span>温度标准 {{ reagentCabinetStorageStandard(selectedReagentCabinet).temperature }} · 湿度标准 {{ reagentCabinetStorageStandard(selectedReagentCabinet).humidity }}</span></div></div>
+                <section class="reagent-cabinet-stock-section"><div class="section-subhead"><div><h4>柜内试剂</h4><span>库存台账与存放标准</span></div><span>{{ selectedReagentCabinetItems.length }} 种</span></div><div class="reagent-cabinet-stock-table-wrap"><table class="lab-table"><thead><tr><th>试剂编号</th><th>试剂名称</th><th>规格</th><th>库存</th><th>存放温度</th><th>存放湿度</th><th>当前状态</th></tr></thead><tbody><tr v-for="item in selectedReagentCabinetItems" :key="item.code"><td>{{ item.code }}</td><td>{{ item.name }}</td><td>{{ item.spec }}</td><td>{{ item.stock }}{{ item.unit }}</td><td>{{ selectedReagentCabinet ? reagentCabinetStorageStandard(selectedReagentCabinet).temperature : '—' }}</td><td>{{ selectedReagentCabinet ? reagentCabinetStorageStandard(selectedReagentCabinet).humidity : '—' }}</td><td><span :class="['lab-status', selectedReagentCabinet && reagentCabinetAlert(selectedReagentCabinet) ? 'danger' : 'ok']">{{ selectedReagentCabinet && reagentCabinetAlert(selectedReagentCabinet) ? '环境不符合' : '符合标准' }}</span></td></tr><tr v-if="!selectedReagentCabinetItems.length"><td colspan="7">该试剂柜暂无关联试剂。</td></tr></tbody></table></div></section>
+                <div class="cabinet-history-table-wrap"><table class="lab-table"><thead><tr><th>采集时间</th><th>柜内温度</th><th>柜内湿度</th></tr></thead><tbody><tr v-for="item in reagentCabinetHistoryRows" :key="item.time"><td>{{ item.time }}</td><td>{{ item.temperature }}℃</td><td>{{ item.humidity }}%</td></tr></tbody></table></div>
+              </div>
+            </section>
+          </div>
+
+          <div v-if="showReagentCabinetTrendDialog" class="process-dialog-mask" @click.self="showReagentCabinetTrendDialog = false">
+            <section class="environment-trend-dialog">
+              <div class="process-dialog-head"><div><h2>试剂柜温湿度趋势</h2><span>{{ activeReagentCabinetRangeLabel }} · {{ activeReagentCabinetFilter === '全部试剂柜' ? '全部试剂柜' : reagentCabinetByCode(activeReagentCabinetFilter).name }}</span></div><button type="button" @click="showReagentCabinetTrendDialog = false"><X :size="14" /> 关闭</button></div>
+              <div class="environment-trend-dialog-body">
+                <div class="environment-trend-toolbar"><div class="env-range-tabs"><button v-for="range in environmentRanges" :key="range.key" type="button" :class="{ active: activeReagentCabinetRange === range.key }" @click="activeReagentCabinetRange = range.key">{{ range.label }}</button></div><label>试剂柜<select v-model="activeReagentCabinetFilter"><option>全部试剂柜</option><option v-for="cabinet in reagentCabinets" :key="cabinet.code" :value="cabinet.code">{{ cabinet.name }}</option></select></label></div>
+                <div class="environment-trend-summary"><span>统计维度 <b>{{ activeReagentCabinetRangeLabel }}</b></span><span>平均温度 <b>{{ reagentCabinetTrendAvgTemperature }}</b></span><span>平均湿度 <b>{{ reagentCabinetTrendAvgHumidity }}</b></span></div>
+                <div class="env-trend-chart environment-popup-chart">
                   <div class="chart-legend"><span class="temp">温度</span><span class="humidity">湿度</span></div>
-                  <div v-if="hoveredReagentCabinetPoint" class="chart-tooltip">{{ hoveredReagentCabinetPoint.label }} · {{ hoveredReagentCabinetPoint.date }} · 温度 {{ hoveredReagentCabinetPoint.temperature }}℃ · 湿度 {{ hoveredReagentCabinetPoint.humidity }}%</div>
-                  <svg :viewBox="`0 0 ${environmentChartWidth} ${environmentChartHeight}`" role="img" aria-label="试剂柜历史温湿度趋势">
+                  <div v-if="hoveredReagentCabinetPoint" class="chart-tooltip">{{ hoveredReagentCabinetPoint.label }} · {{ formatEnvironmentTooltipDate(activeReagentCabinetRange, hoveredReagentCabinetPoint.date) }} · 温度 {{ hoveredReagentCabinetPoint.temperature }}℃ · 湿度 {{ hoveredReagentCabinetPoint.humidity }}%</div>
+                  <svg :viewBox="`0 0 ${environmentChartWidth} ${environmentChartHeight}`" role="img" aria-label="试剂柜温湿度趋势图">
                     <line :x1="environmentChartPaddingX" :y1="environmentChartPaddingY" :x2="environmentChartPaddingX" :y2="environmentChartLabelY - 30" />
                     <line :x1="environmentChartPaddingX" :y1="environmentChartLabelY - 30" :x2="environmentChartWidth - environmentChartPaddingX" :y2="environmentChartLabelY - 30" />
-                    <template v-for="point in reagentCabinetChartRows" :key="`${point.date}-axis`">
-                      <line class="chart-x-guide" :x1="point.x" :y1="environmentChartPaddingY" :x2="point.x" :y2="environmentChartLabelY - 30" />
-                      <text class="chart-axis-text" :x="point.x" :y="environmentChartLabelY" text-anchor="middle">{{ point.label }}</text>
-                    </template>
-                    <polyline class="temperature-line" :points="reagentCabinetTemperaturePoints" />
-                    <polyline class="humidity-line" :points="reagentCabinetHumidityPoints" />
-                    <template v-for="point in reagentCabinetChartRows" :key="point.date">
-                      <circle class="temperature-dot" r="4" v-bind="environmentPointPosition(point, 'temperature')" @mouseenter="hoveredReagentCabinetPoint = point" @mouseleave="hoveredReagentCabinetPoint = null" />
-                      <circle class="humidity-dot" r="4" v-bind="environmentPointPosition(point, 'humidity')" @mouseenter="hoveredReagentCabinetPoint = point" @mouseleave="hoveredReagentCabinetPoint = null" />
-                    </template>
+                    <template v-for="(point, index) in reagentCabinetChartRows" :key="`${point.date}-${point.label}-axis`"><line class="chart-x-guide" :x1="point.x" :y1="environmentChartPaddingY" :x2="point.x" :y2="environmentChartLabelY - 30" /><text v-if="showReagentCabinetAxisLabel(index, reagentCabinetChartRows.length)" class="chart-axis-text" :x="point.x" :y="environmentChartLabelY" text-anchor="middle">{{ point.label }}</text></template>
+                    <polyline class="temperature-line" :points="reagentCabinetTemperaturePoints" /><polyline class="humidity-line" :points="reagentCabinetHumidityPoints" />
+                    <template v-for="point in reagentCabinetChartRows" :key="`${point.date}-${point.label}`"><circle class="temperature-dot" r="4" v-bind="environmentPointPosition(point, 'temperature')" @mouseenter="hoveredReagentCabinetPoint = point" @mouseleave="hoveredReagentCabinetPoint = null" /><circle class="humidity-dot" r="4" v-bind="environmentPointPosition(point, 'humidity')" @mouseenter="hoveredReagentCabinetPoint = point" @mouseleave="hoveredReagentCabinetPoint = null" /></template>
                   </svg>
                 </div>
-                <div class="cabinet-history-table-wrap"><table class="lab-table"><thead><tr><th>采集时间</th><th>柜内温度</th><th>柜内湿度</th></tr></thead><tbody><tr v-for="item in reagentCabinetHistoryRows" :key="item.time"><td>{{ item.time }}</td><td>{{ item.temperature }}℃</td><td>{{ item.humidity }}%</td></tr></tbody></table></div>
               </div>
             </section>
           </div>
@@ -5925,15 +6348,16 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 <div><span>样品编号</span><b>{{ displaySampleNo(selectedUnqualifiedRecord) }}</b></div>
                 <div><span>样品名称</span><b>{{ selectedUnqualifiedRecord.sampleName }}</b></div>
                 <div><span>不合格数量</span><b>{{ reportUnqualifiedCount(selectedUnqualifiedRecord) }} 项</b></div>
-                <div><span>关键/普通</span><b>{{ qualityRiskLevel(selectedUnqualifiedRecord).keyCount }} / {{ qualityRiskLevel(selectedUnqualifiedRecord).normalCount }}</b></div>
+                <div><span>检验事由</span><b>{{ selectedUnqualifiedRecord.reason }}</b></div>
+                <div><span>预警时间</span><b>{{ qualityWarningTime(selectedUnqualifiedRecord) }}</b></div>
               </div>
               <div class="unqualified-detail-wrap">
                 <table class="unqualified-detail-table">
-                  <colgroup><col class="unqualified-index-col" /><col /><col /><col /><col /><col /></colgroup>
-                  <thead><tr><th>序号</th><th>不合格项目</th><th>指标属性</th><th>检测结果</th><th>判定</th><th>处置建议</th></tr></thead>
+                  <colgroup><col class="unqualified-index-col" /><col /><col /><col /><col /></colgroup>
+                  <thead><tr><th>序号</th><th>不合格项目</th><th>检测结果</th><th>判定</th><th>处置建议</th></tr></thead>
                   <tbody>
                     <tr v-for="(item, index) in reportUnqualifiedDetails(selectedUnqualifiedRecord)" :key="item.item">
-                      <td>{{ index + 1 }}</td><td class="unqualified-text">{{ item.item }}</td><td><span :class="['indicator-attr-badge', item.isKey ? 'key' : 'normal']">{{ item.isKey ? '关键指标' : '普通指标' }}</span></td><td>{{ item.detectValue }}</td><td><span :class="['warning-level-badge', item.isKey ? 'alarm' : 'warning']">不合格</span></td><td>{{ qualityRiskLevel(selectedUnqualifiedRecord).code === 'level1' ? '进入质量报警处置，建议销样或复检' : '进入质量预警，建议复核检测' }}</td>
+                      <td>{{ index + 1 }}</td><td class="unqualified-text">{{ item.item }}</td><td>{{ item.detectValue }}</td><td><span class="warning-level-badge alarm">不合格</span></td><td>{{ qualityRiskLevel(selectedUnqualifiedRecord).code === 'level1' ? '进入质量报警处置，建议销样或复检' : '进入质量预警，建议复核检测' }}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -5971,7 +6395,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               <section class="detail-section"><h3>{{ upcomingBusinessDialog === 'retain' ? '留样信息' : '销样信息' }}</h3><div class="detail-grid compact">
                 <div><span>样品名称</span><b>{{ upcomingBusinessRecord.sampleName }}</b></div><div><span>报告编号</span><b>{{ upcomingBusinessRecord.reportNo ?? '未生成' }}</b></div>
                 <div><span>样品数量</span><b>{{ sampleCountWithUnit(upcomingBusinessRecord) }}</b></div><div><span>{{ upcomingBusinessDialog === 'retain' ? '留样数量' : '不合格项' }}</span><b>{{ upcomingBusinessDialog === 'retain' ? retainCountWithUnit(upcomingBusinessRecord) : `${reportUnqualifiedCount(upcomingBusinessRecord)} 项` }}</b></div>
-                <div><span>{{ upcomingBusinessDialog === 'retain' ? '留样时间' : '销样来源' }}</span><b>{{ upcomingBusinessDialog === 'retain' ? (upcomingBusinessRecord.retainTime ?? ledgerHandleTime(upcomingBusinessRecord)) : (retainStatusLevel(upcomingBusinessRecord) === 'expired' ? '留样到期自动转入' : upcomingBusinessRecord.approvalStatus) }}</b></div><div><span>{{ upcomingBusinessDialog === 'retain' ? '到期状态' : '当前状态' }}</span><b>{{ upcomingBusinessDialog === 'retain' ? retainExpireStatus(upcomingBusinessRecord) : '待销样处置' }}</b></div>
+                <div><span>{{ upcomingBusinessDialog === 'retain' ? '留样时间' : '销样来源' }}</span><b>{{ upcomingBusinessDialog === 'retain' ? (upcomingBusinessRecord.retainTime ?? ledgerHandleTime(upcomingBusinessRecord)) : (retainStatusLevel(upcomingBusinessRecord) === 'expired' ? '留样到期确认转入' : upcomingBusinessRecord.approvalStatus) }}</b></div><div><span>{{ upcomingBusinessDialog === 'retain' ? '到期状态' : '当前状态' }}</span><b>{{ upcomingBusinessDialog === 'retain' ? retainExpireStatus(upcomingBusinessRecord) : '待销样处置' }}</b></div>
               </div></section>
             </div>
             <div class="dialog-actions"><button v-if="upcomingBusinessDialog === 'retain' && upcomingBusinessRecord.retainRecordId" type="button" @click="openRetainApprovalFlow(upcomingBusinessRecord); upcomingBusinessDialog = null">查看审批流程</button><button v-if="upcomingBusinessDialog === 'destroy' && upcomingBusinessRecord.destroyRecordId" type="button" @click="openDestroyApprovalFlow(upcomingBusinessRecord); upcomingBusinessDialog = null">查看销样流程</button><button v-if="upcomingBusinessDialog === 'destroy' && !upcomingBusinessRecord.destroyRecordId && reportHasFormalReport(upcomingBusinessRecord)" type="button" @click="openReportView(upcomingBusinessRecord.sampleNo); upcomingBusinessDialog = null">查看质检报告</button><button v-else-if="upcomingBusinessDialog === 'destroy' && !upcomingBusinessRecord.destroyRecordId" type="button" @click="openQualityResultView(upcomingBusinessRecord.sampleNo); upcomingBusinessDialog = null">查看质检结果</button><button type="button" @click="upcomingBusinessDialog = null">关闭</button></div>
@@ -6066,9 +6490,9 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                 <h3>留样处理信息</h3>
                 <div class="report-base-grid retain-entry-grid">
                   <label>过期时间<input v-model="retainForm.expireAt" type="date" /></label>
-                  <label>样品状态<select v-model="retainForm.sampleStatus"><option>待审批</option><option>正常</option><option>临期</option><option>待处置</option></select></label>
+                  <label>样品状态<input value="审批中" readonly /></label>
                   <label>处理方式<select v-model="retainForm.handlingMethod"><option>留存</option><option>到期销毁</option><option>复检备用</option><option>其他</option></select></label>
-                  <label>处置时间<input v-model="retainForm.disposalTime" type="datetime-local" /></label>
+                  <label>处置时间<input value="销样审批完成后自动记录" readonly /></label>
                   <label class="full">备注<textarea v-model="retainForm.remark" placeholder="请输入留样说明"></textarea></label>
                 </div>
               </section>
