@@ -114,6 +114,9 @@ interface SamplingRecord {
   samplingApprovalStep?: '送样确认' | '收样确认'
   samplingApprovalUser?: string
   samplingApprovalHistory?: ApprovalHistory[]
+  samplingOrderApprovalStatus?: '未提交' | '审批中' | '审批通过' | '退回修改'
+  samplingOrderApprovalStep?: '负责人' | '编制人' | '审核人' | '批准人'
+  samplingOrderApprovalHistory?: ApprovalHistory[]
 }
 
 interface SamplingForm {
@@ -192,6 +195,7 @@ type QualityRiskCode = 'normal' | 'level1' | 'level2' | 'level3'
 type QualityWarningLevelFilter = 'all' | Exclude<QualityRiskCode, 'normal'>
 type InspectionOverviewDrilldown = 'sampling' | 'pending' | 'approval' | 'retain' | 'destroy'
 type InspectionTodoCategory = 'send' | 'receive' | 'inspect' | 'result' | 'approval' | 'destroy'
+type UpcomingApprovalCategory = 'sampling' | 'approval' | 'retain' | 'destroy'
 type ReportViewMode = 'result' | 'report'
 
 interface SystemUser {
@@ -401,6 +405,8 @@ const showSendSample = ref(false)
 const showReceiveSample = ref(false)
 const showSamplingApprovalFlow = ref(false)
 const samplingApprovalOpinion = ref('')
+const showSamplingOrderApprovalFlow = ref(false)
+const samplingOrderApprovalOpinion = ref('')
 const showInspectionScanDialog = ref(false)
 const inspectionScanValue = ref('')
 const showReportForm = ref(false)
@@ -427,8 +433,7 @@ const showDestroyApprovalFlow = ref(false)
 const selectedDestroyRecordNo = ref('')
 const destroyApprovalOpinion = ref('')
 const destroyForm = ref({ recordId: '', sourceRetainId: '', sampleNo: '', sampleName: '', warehouseNo: '', cargoPosition: '', specification: '', variety: '', destroySource: '留样到期', remark: '' })
-const upcomingBusinessDialog = ref<'retain' | 'destroy' | null>(null)
-const upcomingBusinessRecord = ref<SamplingRecord | null>(null)
+const upcomingApprovalDialog = ref<UpcomingApprovalCategory | null>(null)
 
 const showInstrumentCategoryForm = ref(false)
 const showInstrumentEntryForm = ref(false)
@@ -601,16 +606,6 @@ const activeSamplingRecords = computed(() => {
 })
 
 const allSamplingRecords = computed(() => [...internalSamplingRecords.value, ...externalSamplingRecords.value])
-
-const samplingFlowSummary = computed(() => {
-  const records = activeSamplingRecords.value
-  return [
-    { label: '录入中', value: records.filter((record) => record.status === '录入中').length },
-    { label: '扦样完成', value: records.filter((record) => record.status === '扦样完成').length },
-    { label: '已送样', value: records.filter((record) => record.status === '已送样').length },
-    { label: '已收样', value: records.filter((record) => record.status === '已收样').length },
-  ]
-})
 
 const selectedSamplingRecord = computed(() => {
   return allSamplingRecords.value.find((item) => item.orderNo === selectedSamplingNo.value) ?? activeSamplingRecords.value[0] ?? allSamplingRecords.value[0]
@@ -2531,6 +2526,11 @@ const reagentFlowRecords = ref<ReagentFlowRecord[]>([
 
 const ensureReagentUsageDemoRecords = () => {
   const demoRecords: ReagentFlowRecord[] = [
+    { recordNo: 'SJCG-2026071801', action: '采购', reagentCode: 'SJ-PT-002', reagentName: '氢氧化钠标准溶液', quantity: 10, unit: '瓶', location: '普通试剂柜A02', handler: '王帅', supplier: '江苏粮检试剂供应中心', time: '2026-07-18 08:40', remark: '低库存补充采购审核测试', approvalStatus: '审批中', approvalStep: '审核人', processStatus: '审批中', stockApplied: false, approvalHistory: [{ title: '提交：采购申请', user: '王帅（编制人）', time: '2026-07-18 08:40' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-18 09:00' }] },
+    { recordNo: 'SJCG-2026071901', action: '采购', reagentCode: 'SJ-YZD-003', reagentName: '高锰酸钾', quantity: 6, unit: '瓶', location: '易制毒双人双锁柜B03', handler: '质检员A', supplier: '镇江标准试剂有限公司', time: '2026-07-19 09:15', remark: '易制毒试剂安全库存采购审核测试', approvalStatus: '审批中', approvalStep: '审核人', processStatus: '审批中', stockApplied: false, approvalHistory: [{ title: '提交：采购申请', user: '质检员A（编制人）', time: '2026-07-19 09:15' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-19 09:35' }] },
+    { recordNo: 'SJLC-2026071801', action: '领用', reagentCode: 'SJ-PT-003', reagentName: '酚酞指示剂', quantity: 2, unit: '瓶', location: '普通试剂柜A03', handler: '王帅', time: '2026-07-18 10:20', remark: '酸碱滴定检测领用审核测试', approvalStatus: '审批中', approvalStep: '审核人', processStatus: '审批中', stockApplied: false, approvalHistory: [{ title: '提交：领用申请', user: '王帅（编制人）', time: '2026-07-18 10:20' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-18 10:30' }] },
+    { recordNo: 'SJLC-2026071901', action: '领用', reagentCode: 'SJ-YZD-004', reagentName: '丙酮', quantity: 1, unit: '瓶', location: '易制毒双人双锁柜B01', handler: '质检员A', time: '2026-07-19 13:10', remark: '样品前处理领用审核测试', approvalStatus: '审批中', approvalStep: '审核人', processStatus: '审批中', stockApplied: false, approvalHistory: [{ title: '提交：领用申请', user: '质检员A（编制人）', time: '2026-07-19 13:10' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-19 13:25' }] },
+    { recordNo: 'SJLC-2026072001', action: '领用', reagentCode: 'SJ-YZD-005', reagentName: '甲苯', quantity: 1, unit: '瓶', location: '易制毒双人双锁柜B02', handler: '王帅', time: '2026-07-20 08:20', remark: '挥发性组分检测领用审核测试', approvalStatus: '审批中', approvalStep: '审核人', processStatus: '审批中', stockApplied: false, approvalHistory: [{ title: '提交：领用申请', user: '王帅（编制人）', time: '2026-07-20 08:20' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-20 08:35' }] },
     { recordNo: 'SJCG-2026071201', action: '采购', reagentCode: 'SJ-PT-004', reagentName: '甲基红指示剂', quantity: 8, unit: '瓶', location: '普通试剂柜A01', handler: '王帅', supplier: '镇江标准试剂有限公司', time: '2026-07-12 08:30', remark: '低库存补充采购', approvalStatus: '审批中', approvalStep: '审核人', processStatus: '审批中', stockApplied: false, approvalHistory: [{ title: '提交：采购申请', user: '王帅（编制人）', time: '2026-07-12 08:30' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-12 08:40' }] },
     { recordNo: 'SJCG-2026071101', action: '采购', reagentCode: 'SJ-PT-005', reagentName: '石油醚', quantity: 12, unit: '瓶', location: '普通试剂柜A02', handler: '质检员A', supplier: '江苏粮检试剂供应中心', time: '2026-07-11 09:00', remark: '月度采购计划', approvalStatus: '审批通过', stockApplied: false, approvalHistory: [{ title: '提交：采购申请', user: '质检员A（编制人）', time: '2026-07-11 09:00' }, { title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-11 11:00' }] },
     { recordNo: 'SJLC-2026070601', action: '领用', reagentCode: 'SJ-PT-001', reagentName: '无水乙醇', quantity: 2, unit: '瓶', location: '普通试剂柜A01', handler: '质检员A', time: '2026-07-06 09:20', remark: '水分检测前处理', approvalStatus: '审批通过', processStatus: '领用中', stockApplied: true, approvalHistory: [{ title: '提交：领用申请', user: '质检员A（编制人）', time: '2026-07-06 09:22' }, { title: '审批完成：领用放行', user: '赵批准（批准人）', time: '2026-07-06 09:40' }] },
@@ -3056,16 +3056,76 @@ const inspectionKpis = computed(() => [
 
 const upcomingBusinessItems = computed(() => {
   const items = [
-    { key: 'sampling', title: '扦样单审批确认待办', description: '送样或收样信息等待对应用户确认', records: samplingApprovalTodoRecords.value, icon: ClipboardPenLine, tone: 'blue', action: '审批确认' },
+    { key: 'sampling', title: '扦样单审批待办', description: '扦样单审批或送收样确认等待当前用户处理', records: samplingApprovalTodoRecords.value, icon: ClipboardPenLine, tone: 'blue', action: '处理审批' },
     { key: 'approval', title: '待审批报告审批', description: '检验报告等待当前用户审批', records: currentApprovalTodoRecords.value, icon: CheckCircle2, tone: 'orange', action: '审批报告' },
     { key: 'retain', title: '留样审批', description: '留样申请等待当前节点审批确认', records: retainRecords.value.filter((record) => canApproveRetain(record)), icon: PackageCheck, tone: 'green', action: '审批留样' },
     { key: 'destroy', title: '销样审批', description: '销样申请等待当前节点审批确认', records: destroyRecords.value.filter((record) => canApproveDestroy(record)), icon: Trash2, tone: 'red', action: '审批销样' },
   ]
   const total = items.reduce((sum, item) => sum + item.records.length, 0)
-  return items.map((item) => ({ ...item, count: item.records.length, percent: total ? Math.round((item.records.length / total) * 100) : 0, record: item.records[0] }))
+  return items.map((item) => ({ ...item, count: item.records.length, percent: total ? Math.round((item.records.length / total) * 100) : 0 }))
 })
 
 const upcomingBusinessTotal = computed(() => upcomingBusinessItems.value.reduce((sum, item) => sum + item.count, 0))
+const upcomingApprovalRecords = computed<SamplingRecord[]>(() => {
+  const category = upcomingApprovalDialog.value
+  if (!category) return []
+  return upcomingBusinessItems.value.find((item) => item.key === category)?.records ?? []
+})
+
+const upcomingApprovalMeta = computed(() => {
+  const meta: Record<UpcomingApprovalCategory, { title: string; description: string }> = {
+    sampling: { title: '扦样单审批待办', description: '扦样单审批及送收样确认' },
+    approval: { title: '检验报告审批待办', description: '质检结果审批与报告生成' },
+    retain: { title: '留样审批待办', description: '留样登记审核与确认' },
+    destroy: { title: '销样审批待办', description: '销样登记审核与确认' },
+  }
+  return upcomingApprovalDialog.value ? meta[upcomingApprovalDialog.value] : { title: '', description: '' }
+})
+
+const upcomingApprovalBusinessText = (record: SamplingRecord) => {
+  if (upcomingApprovalDialog.value === 'sampling') return record.samplingOrderApprovalStep ? '扦样单审批' : record.samplingApprovalStep ?? '送收样确认'
+  if (upcomingApprovalDialog.value === 'approval') return '检验报告审批'
+  if (upcomingApprovalDialog.value === 'retain') return '留样审批'
+  return '销样审批'
+}
+
+const upcomingApprovalStepText = (record: SamplingRecord) => {
+  if (upcomingApprovalDialog.value === 'sampling') return record.samplingOrderApprovalStep ? samplingOrderApprovalStepText(record.samplingOrderApprovalStep) : record.samplingApprovalStep ?? '待确认'
+  if (upcomingApprovalDialog.value === 'approval') return record.approvalStep ?? record.approvalStatus ?? '未送审'
+  if (upcomingApprovalDialog.value === 'retain') return record.retainApprovalStep ?? record.retainApprovalStatus ?? '未送审'
+  return record.destroyApprovalStep ?? record.destroyApprovalStatus ?? '未送审'
+}
+
+const upcomingApprovalRecordNo = (record: SamplingRecord) => {
+  if (upcomingApprovalDialog.value === 'sampling') return record.orderNo
+  if (upcomingApprovalDialog.value === 'approval') return record.reportNo ?? displaySampleNo(record)
+  if (upcomingApprovalDialog.value === 'retain') return record.retainRecordId ?? displaySampleNo(record)
+  return record.destroyRecordId ?? displaySampleNo(record)
+}
+
+const openUpcomingApprovalFlow = (record: SamplingRecord) => {
+  const category = upcomingApprovalDialog.value
+  upcomingApprovalDialog.value = null
+  if (category === 'sampling') {
+    if (record.samplingOrderApprovalStep) openSamplingOrderApproval(record)
+    else openSamplingApprovalFlow(record)
+  } else if (category === 'approval') openApprovalFlow(record.sampleNo)
+  else if (category === 'retain') openRetainApprovalFlow(record)
+  else if (category === 'destroy') openDestroyApprovalFlow(record)
+}
+
+const approveUpcomingBusiness = (record: SamplingRecord, action: 'pass' | 'return') => {
+  const category = upcomingApprovalDialog.value
+  if (category === 'sampling') {
+    if (canApproveSamplingOrder(record)) approveSamplingOrder(action, record)
+    else approveSamplingTransfer(action, record)
+  } else if (category === 'approval') {
+    approvalOpinion.value = ''
+    approveReport(record.sampleNo, action)
+  } else if (category === 'retain') approveRetainRecord(action, record)
+  else if (category === 'destroy') approveDestroyRecord(action, record)
+}
+
 const upcomingBusinessChartSegments = computed(() => {
   let offset = 0
   return upcomingBusinessItems.value.filter((item) => item.count > 0).map((item) => {
@@ -3121,20 +3181,16 @@ const openInspectionTab = (tab: string) => {
   inspectionTab.value = tab
 }
 
-const openUpcomingBusiness = (item: { key: string; record?: SamplingRecord }) => {
-  const record = item.record
-  if (!record) return
-  if (item.key === 'sampling') return openSamplingApprovalFlow(record)
-  if (item.key === 'approval') return openApprovalFlow(record.sampleNo)
-  if (item.key === 'retain') return openRetainApprovalFlow(record)
-  if (item.key === 'destroy') return openDestroyApprovalFlow(record)
+const openUpcomingBusiness = (item: { key: string; count?: number }) => {
+  if (!item.count) return
+  upcomingApprovalDialog.value = item.key as UpcomingApprovalCategory
 }
 
 const openInspectionTodo = (category: InspectionTodoCategory) => {
   inspectionTodoDialog.value = category
 }
 
-const sampleStatusRows = computed(() => ['录入中', '扦样完成', '已送样', '待检', '在检', '检毕', '留样', '销样'].map((status) => {
+const sampleStatusRows = computed(() => ['录入中', '扦样审批中', '扦样完成', '已送样', '待检', '在检', '检毕', '留样', '销样'].map((status) => {
   const count = allSamplingRecords.value.filter((item) => item.status === status || (item.status === '已收样' && (item.labelStatus ?? '待检') === status)).length
   const percent = allSamplingRecords.value.length ? Math.round((count / allSamplingRecords.value.length) * 100) : 0
   return { status, count, percent }
@@ -3348,6 +3404,10 @@ const workflowStatusTestRecords: SamplingRecord[] = [
   createWorkflowStatusTestRecord({ orderNo: 'QY20260713002', sampleNo: 'YP20260713002', sampleName: '50仓大豆扦样完成测试样品', status: '扦样完成', grainType: '大豆', warehouseNo: '50', origin: '黑龙江', cargoPosition: '50仓1号货位', sampler: '李四', remark: '用于验证扦样完成待送样状态。' }),
   createWorkflowStatusTestRecord({ orderNo: 'QY20260713003', sampleNo: 'YP20260713003', sampleName: '49仓玉米已送样测试样品', status: '已送样', sender: '王五', sendTime: '2026-07-13 09:10', remark: '用于验证已送样待收样状态。' }),
   createWorkflowStatusTestRecord({ orderNo: 'QY20260713004', sampleNo: 'YP20260713004', sampleName: '50仓大豆留样测试样品', status: '已收样', labelStatus: '留样', approvalStatus: '审批通过', reason: '入库验收', grainType: '大豆', warehouseNo: '50', origin: '黑龙江', cargoPosition: '50仓1号货位', sampler: '李四', sender: '李四', sendTime: '2026-07-13 09:20', receiver: '质检员A', receiveTime: '2026-07-13 09:45', reportNo: 'ZJBG-NB-20260713004', reportMeta: { category: '监督检验', compiler: '王帅', reviewer: '李审核', approver: '赵批准', remark: '审批通过后留样，留样状态测试数据。' }, approvalHistory: [{ title: '提交：送审', user: '王帅（编制人）', time: '2026-07-13 10:10' }, { title: '编制人：审批通过/同意', user: '王帅（编制人）', time: '2026-07-13 10:25' }, { title: '审核人：审批通过/同意', user: '李审核（审核人）', time: '2026-07-13 10:40' }, { title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-13 11:00' }], retainTime: '2026-07-13 11:00', handleTime: '2026-07-13 11:00', retainExpireDays: 60, reportResults: buildDefaultReportResults({ grainType: '大豆', reason: '入库验收' } as SamplingRecord) }),
+  createWorkflowStatusTestRecord({ orderNo: 'QY20260720004', sampleNo: 'YP20260720004', sampleName: '50仓大豆责任人审批测试样品', samplingDate: '2026-07-20', status: '扦样审批中', grainType: '大豆', warehouseNo: '50', origin: '黑龙江', cargoPosition: '50仓1号货位', samplingOrderApprovalStatus: '审批中', samplingOrderApprovalStep: '负责人', samplingOrderApprovalHistory: [{ title: '提交扦样单审批', user: '王帅（提交人）', time: '2026-07-20 07:50' }], remark: '用于验证责任人审批节点。' }),
+  createWorkflowStatusTestRecord({ orderNo: 'QY20260720001', sampleNo: 'YP20260720001', sampleName: '49仓玉米扦样审核测试样品', samplingDate: '2026-07-20', status: '扦样审批中', samplingOrderApprovalStatus: '审批中', samplingOrderApprovalStep: '审核人', samplingOrderApprovalHistory: [{ title: '提交扦样单审批', user: '王帅（提交人）', time: '2026-07-20 08:30' }, { title: '责任人：审批通过/同意', user: '周负责（负责人）', time: '2026-07-20 08:45' }], remark: '用于李审核用户验证扦样单审核节点。' }),
+  createWorkflowStatusTestRecord({ orderNo: 'QY20260720002', sampleNo: 'YP20260720002', sampleName: '50仓大豆扦样批准测试样品', samplingDate: '2026-07-20', status: '扦样审批中', grainType: '大豆', warehouseNo: '50', origin: '黑龙江', cargoPosition: '50仓1号货位', sampler: '李四', samplingOrderApprovalStatus: '审批中', samplingOrderApprovalStep: '批准人', samplingOrderApprovalHistory: [{ title: '提交扦样单审批', user: '王帅（提交人）', time: '2026-07-20 09:00' }, { title: '责任人：审批通过/同意', user: '周负责（负责人）', time: '2026-07-20 09:15' }, { title: '审核人：审批通过/同意', user: '李审核（审核人）', time: '2026-07-20 09:30' }], remark: '用于验证扦样单批准人审批节点。' }),
+  createWorkflowStatusTestRecord({ orderNo: 'QY20260720003', sampleNo: 'YP20260720003', sampleName: '49仓玉米扦样审批完成样品', samplingDate: '2026-07-20', status: '扦样完成', samplingOrderApprovalStatus: '审批通过', samplingOrderApprovalHistory: [{ title: '提交扦样单审批', user: '王帅（提交人）', time: '2026-07-20 10:00' }, { title: '责任人：审批通过/同意', user: '周负责（负责人）', time: '2026-07-20 10:15' }, { title: '审核人：审批通过/同意', user: '李审核（审核人）', time: '2026-07-20 10:30' }, { title: '批准人：审批通过/同意', user: '赵批准（批准人）', time: '2026-07-20 10:45' }], remark: '用于验证扦样单审批完成后允许送样。' }),
 ]
 
 const createWarehouseMapSampleRecord = (warehouseNo: string, grainType: string, keyFailures: number, normalFailures: number): SamplingRecord => {
@@ -4109,9 +4169,28 @@ const openSamplingForm = (mode: 'create' | 'edit', orderNo?: string) => {
 const upsertSamplingRecord = (status: string) => {
   const records = targetSamplingRecords()
   const index = records.findIndex((item) => item.orderNo === samplingForm.value.orderNo)
-  const cargoPosition = normalizeCargoPositionValue({ ...records[index], ...samplingForm.value } as SamplingRecord)
+  const existing = records[index]
+  const cargoPosition = normalizeCargoPositionValue({ ...existing, ...samplingForm.value } as SamplingRecord)
   const nextReason = activeQualityStandards({ grainType: samplingForm.value.grainType, reason: samplingReason.value }).length ? samplingReason.value : inspectionReasons[0]
-  const nextRecord: SamplingRecord = { ...records[index], ...samplingForm.value, reason: nextReason, source: samplingSource.value === 'internal' ? '内部扦样' : '外部扦样', status, warehouseNo: cargoPositionWarehouseNo(cargoPosition), cargoPosition }
+  const submitForApproval = status === '扦样完成'
+  const submitTime = currentDateTimeText()
+  const nextRecord: SamplingRecord = {
+    ...existing,
+    ...samplingForm.value,
+    reason: nextReason,
+    source: samplingSource.value === 'internal' ? '内部扦样' : '外部扦样',
+    status: submitForApproval ? '扦样审批中' : status,
+    warehouseNo: cargoPositionWarehouseNo(cargoPosition),
+    cargoPosition,
+    samplingOrderApprovalStatus: submitForApproval ? '审批中' : existing?.samplingOrderApprovalStatus ?? '未提交',
+    samplingOrderApprovalStep: submitForApproval ? '负责人' : existing?.samplingOrderApprovalStep,
+    samplingOrderApprovalHistory: submitForApproval
+      ? [
+          ...(existing?.samplingOrderApprovalHistory ?? []),
+          { title: existing?.samplingOrderApprovalStatus === '退回修改' ? '重新提交扦样单审批' : '提交扦样单审批', user: `${currentLoginUser.value?.name ?? samplingForm.value.sampler}（提交人）`, time: submitTime },
+        ]
+      : existing?.samplingOrderApprovalHistory,
+  }
   if (index >= 0) {
     records[index] = nextRecord
   } else {
@@ -4126,6 +4205,75 @@ const deleteSamplingRecord = (orderNo: string) => {
   const index = records.findIndex((item) => item.orderNo === orderNo)
   if (index >= 0) records.splice(index, 1)
 }
+
+const samplingOrderApprovalStatusText = (record: SamplingRecord) => {
+  if (record.samplingOrderApprovalStatus === '审批中' && record.samplingOrderApprovalStep) return `审批中 · ${samplingOrderApprovalStepText(record.samplingOrderApprovalStep)}`
+  if (record.samplingOrderApprovalStatus === '审批通过') return '审批通过'
+  if (record.samplingOrderApprovalStatus === '退回修改') return '退回修改'
+  if (record.samplingOrderApprovalStatus === '未提交' || record.status === '录入中') return '未提交'
+  return '历史已审批'
+}
+
+const samplingOrderApprovalStepText = (step?: SamplingRecord['samplingOrderApprovalStep']) => step === '负责人' || step === '编制人' ? '责任人' : step ?? '流程已结束'
+
+const samplingOrderApprovalTone = (record: SamplingRecord) => {
+  if (record.samplingOrderApprovalStatus === '审批中') return 'warn'
+  if (record.samplingOrderApprovalStatus === '退回修改') return 'danger'
+  if (record.samplingOrderApprovalStatus === '未提交' || record.status === '录入中') return 'muted'
+  return 'ok'
+}
+
+const samplingOrderApprovalFlowItems = (record: SamplingRecord) => {
+  const history = record.samplingOrderApprovalHistory ?? []
+  const completed = record.samplingOrderApprovalStatus === '审批通过'
+  return [
+    { name: '提交审批', state: history.some((item) => item.title.includes('提交扦样单')) ? 'done' : 'todo', icon: Send },
+    { name: '责任人审批', state: ['负责人', '编制人'].includes(String(record.samplingOrderApprovalStep)) ? 'active' : history.some((item) => item.title.includes('责任人') || item.title.includes('编制人')) || ['审核人', '批准人'].includes(String(record.samplingOrderApprovalStep)) || completed ? 'done' : 'todo', icon: Edit3 },
+    { name: '审核人审批', state: record.samplingOrderApprovalStep === '审核人' ? 'active' : history.some((item) => item.title.includes('审核人')) || record.samplingOrderApprovalStep === '批准人' || completed ? 'done' : 'todo', icon: ClipboardList },
+    { name: '批准人批准', state: record.samplingOrderApprovalStep === '批准人' ? 'active' : completed ? 'done' : 'todo', icon: CheckCircle2 },
+    { name: '扦样完成', state: completed ? 'done' : 'todo', icon: PackageCheck },
+  ]
+}
+
+const canApproveSamplingOrder = (record?: SamplingRecord) => Boolean(record?.samplingOrderApprovalStep && (record.samplingOrderApprovalStep === currentLoginUser.value?.role || (record.samplingOrderApprovalStep === '编制人' && currentLoginUser.value?.role === '负责人')))
+
+const openSamplingOrderApproval = (record: SamplingRecord) => {
+  selectedSamplingNo.value = record.orderNo
+  samplingOrderApprovalOpinion.value = ''
+  showSamplingOrderApprovalFlow.value = true
+}
+
+const approveSamplingOrder = (action: 'pass' | 'return', record?: SamplingRecord) => {
+  const target = record ?? selectedSamplingRecord.value
+  if (!target?.samplingOrderApprovalStep || !canApproveSamplingOrder(target)) return
+  selectedSamplingNo.value = target.orderNo
+  const step = target.samplingOrderApprovalStep === '编制人' ? '负责人' : target.samplingOrderApprovalStep
+  const user = currentLoginUser.value
+  const opinion = record ? '' : samplingOrderApprovalOpinion.value.trim()
+  target.samplingOrderApprovalHistory = [
+    ...(target.samplingOrderApprovalHistory ?? []),
+    { title: action === 'pass' ? `${step}：审批通过/同意` : `${step}：不同意，退回修改`, user: user ? `${user.name}（${user.role}）` : '系统', time: currentDateTimeText(), ...(opinion ? { opinion } : {}) },
+  ]
+
+  if (action === 'return') {
+    target.status = '录入中'
+    target.samplingOrderApprovalStatus = '退回修改'
+    target.samplingOrderApprovalStep = undefined
+  } else if (step === '负责人') {
+    target.samplingOrderApprovalStep = '审核人'
+    target.samplingOrderApprovalStatus = '审批中'
+  } else if (step === '审核人') {
+    target.samplingOrderApprovalStep = '批准人'
+    target.samplingOrderApprovalStatus = '审批中'
+  } else {
+    target.samplingOrderApprovalStep = undefined
+    target.samplingOrderApprovalStatus = '审批通过'
+    target.status = '扦样完成'
+  }
+  samplingOrderApprovalOpinion.value = ''
+}
+
+const canSendSamplingRecord = (record: SamplingRecord) => record.status === '扦样完成' && (!record.samplingOrderApprovalStatus || record.samplingOrderApprovalStatus === '审批通过')
 
 const openSendSample = (orderNo: string) => {
   selectedSamplingNo.value = orderNo
@@ -4177,7 +4325,7 @@ const confirmReceiveSample = () => {
 
 const canApproveSamplingTransfer = (record?: SamplingRecord) => Boolean(record?.samplingApprovalStep && record.samplingApprovalUser === currentLoginUser.value?.name)
 
-const samplingApprovalTodoRecords = computed(() => allSamplingRecords.value.filter((record) => canApproveSamplingTransfer(record)))
+const samplingApprovalTodoRecords = computed(() => allSamplingRecords.value.filter((record) => canApproveSamplingTransfer(record) || canApproveSamplingOrder(record)))
 
 const openSamplingApprovalFlow = (record: SamplingRecord) => {
   selectedSamplingNo.value = record.orderNo
@@ -4185,15 +4333,17 @@ const openSamplingApprovalFlow = (record: SamplingRecord) => {
   showSamplingApprovalFlow.value = true
 }
 
-const approveSamplingTransfer = (action: 'pass' | 'return') => {
-  const target = selectedSamplingRecord.value
+const approveSamplingTransfer = (action: 'pass' | 'return', record?: SamplingRecord) => {
+  const target = record ?? selectedSamplingRecord.value
   if (!target?.samplingApprovalStep || !canApproveSamplingTransfer(target)) return
+  selectedSamplingNo.value = target.orderNo
   const step = target.samplingApprovalStep
   const user = currentLoginUser.value
   const resultTitle = action === 'pass' ? `${step}：审批通过并确认` : `${step}：退回修改`
+  const opinion = record ? '' : samplingApprovalOpinion.value.trim()
   target.samplingApprovalHistory = [
     ...(target.samplingApprovalHistory ?? []),
-    { title: resultTitle, user: user ? `${user.name}（确认人）` : '系统', time: currentDateTimeText(), ...(samplingApprovalOpinion.value.trim() ? { opinion: samplingApprovalOpinion.value.trim() } : {}) },
+    { title: resultTitle, user: user ? `${user.name}（确认人）` : '系统', time: currentDateTimeText(), ...(opinion ? { opinion } : {}) },
   ]
   if (action === 'return') {
     target.status = step === '送样确认' ? '扦样完成' : '已送样'
@@ -4868,16 +5018,12 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
               <button class="primary-action" type="button" @click="openSamplingForm('create')"><Plus :size="14" /> 新增录入</button>
             </div>
 
-            <div class="sampling-flow-summary">
-              <div v-for="item in samplingFlowSummary" :key="item.label"><span>{{ item.label }}</span><strong>{{ item.value }}</strong></div>
-            </div>
-
             <div class="sampling-filter-bar">
               <input v-model="samplingFilter.orderNo" placeholder="扦样单编号" />
               <input v-model="samplingFilter.sampleName" placeholder="样品名称" />
               <select v-model="samplingFilter.reason"><option value="">检验事由</option><option v-for="item in [...internalReasons, ...externalReasons].filter((value, index, array) => array.indexOf(value) === index)" :key="item">{{ item }}</option></select>
               <select v-model="samplingFilter.source"><option value="">样品来源</option><option>内部扦样</option><option>外部扦样</option></select>
-              <select v-model="samplingFilter.status"><option value="">流程状态</option><option>录入中</option><option>扦样完成</option><option>送样确认中</option><option>已送样</option><option>收样确认中</option><option>已收样</option></select>
+              <select v-model="samplingFilter.status"><option value="">流程状态</option><option>录入中</option><option>扦样审批中</option><option>扦样完成</option><option>送样确认中</option><option>已送样</option><option>收样确认中</option><option>已收样</option></select>
               <button type="button"><Search :size="14" /> 查询</button>
             </div>
 
@@ -4895,6 +5041,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     <th>扦样日期</th>
                     <th>样品来源</th>
                     <th>流程状态</th>
+                    <th>扦样单审批</th>
                     <th>检验事由</th>
                     <th>操作</th>
                   </tr>
@@ -4911,14 +5058,17 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                     <td>{{ record.samplingDate }}</td>
                     <td>{{ record.source }}</td>
                     <td><span class="sampling-status"><CheckCircle2 :size="12" /> {{ record.status }}</span></td>
+                    <td><span :class="['sampling-order-approval-status', samplingOrderApprovalTone(record)]"><Route :size="12" /> {{ samplingOrderApprovalStatusText(record) }}</span></td>
                     <td>{{ record.reason }}</td>
                     <td>
                       <div class="sampling-actions">
                         <button v-if="record.status !== '录入中'" type="button" @click="openSamplingDetail(record.orderNo)"><Eye :size="13" /> 查看</button>
                         <button v-if="record.status === '录入中'" type="button" @click="openSamplingForm('edit', record.orderNo)"><Edit3 :size="13" /> 编辑</button>
                         <button v-if="record.status === '录入中'" type="button" @click="deleteSamplingRecord(record.orderNo)"><Trash2 :size="13" /> 删除</button>
-                        <button v-if="record.status === '扦样完成'" type="button" @click="openSendSample(record.orderNo)"><Send :size="13" /> 送样</button>
+                        <button v-if="canSendSamplingRecord(record)" type="button" @click="openSendSample(record.orderNo)"><Send :size="13" /> 送样</button>
                         <button v-if="record.status === '已送样'" type="button" @click="openReceiveSample(record.orderNo)"><PackageCheck :size="13" /> 收样</button>
+                        <button v-if="record.samplingOrderApprovalStatus && record.samplingOrderApprovalStatus !== '未提交'" type="button" class="sampling-order-approval-entry" @click="openSamplingOrderApproval(record)"><Route :size="13" /> 审批流程</button>
+                        <span v-if="canApproveSamplingOrder(record)" class="sampling-inline-approval-actions"><button type="button" class="sampling-inline-approve" title="同意当前扦样单" @click="approveSamplingOrder('pass', record)"><CheckCircle2 :size="12" /> 同意</button><button type="button" class="sampling-inline-return" title="退回当前扦样单修改" @click="approveSamplingOrder('return', record)"><CornerDownLeft :size="12" /> 退回修改</button></span>
                         <button v-if="record.status === '送样确认中' || record.status === '收样确认中'" type="button" @click="openSamplingApprovalFlow(record)"><Route :size="13" /> 审批流程</button>
                         <button v-if="record.samplingApprovalHistory?.length && !['送样确认中', '收样确认中'].includes(record.status)" type="button" @click="openSamplingApprovalFlow(record)"><Route :size="13" /> 审批流程</button>
                         <button v-if="canApproveSamplingTransfer(record)" type="button" class="sampling-confirm-action" @click="openSamplingApprovalFlow(record)"><CheckCircle2 :size="13" /> {{ record.samplingApprovalStep === '送样确认' ? '确认送样' : '确认收样' }}</button>
@@ -6162,7 +6312,7 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
             <div class="dialog-actions">
               <button type="button" @click="showSamplingPreview = true">预览扦样登记表</button>
               <button type="button" @click="upsertSamplingRecord('录入中')">保存录入</button>
-              <button type="button" @click="upsertSamplingRecord('扦样完成')">提交录入</button>
+              <button type="button" @click="upsertSamplingRecord('扦样完成')">提交审批</button>
               <button type="button" @click="closeSamplingForm">取消</button>
             </div>
           </section>
@@ -6186,8 +6336,10 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                   <div><span>扦样人</span><b>{{ selectedSamplingRecord.sampler }}</b></div>
                   <div><span>扦样日期</span><b>{{ selectedSamplingRecord.samplingDate }}</b></div>
                   <div><span>流程状态</span><b>{{ selectedSamplingRecord.status }}</b></div>
+                  <div><span>扦样单审批</span><b>{{ samplingOrderApprovalStatusText(selectedSamplingRecord) }}</b></div>
                   <div><span>检验事由</span><b>{{ selectedSamplingRecord.reason }}</b></div>
                 </div>
+                <button v-if="selectedSamplingRecord.samplingOrderApprovalStatus && selectedSamplingRecord.samplingOrderApprovalStatus !== '未提交'" type="button" class="detail-approval-link" @click="showSamplingDetail = false; openSamplingOrderApproval(selectedSamplingRecord)"><Route :size="13" /> 查看扦样单审批流程</button>
               </section>
               <section class="detail-section">
                 <h3>送样信息</h3>
@@ -6618,6 +6770,18 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
           </section>
         </div>
 
+        <div v-if="showSamplingOrderApprovalFlow && selectedSamplingRecord" class="process-dialog-mask" @click.self="showSamplingOrderApprovalFlow = false">
+          <section class="sampling-approval-dialog sampling-order-approval-dialog">
+            <div class="process-dialog-head"><div><h2>扦样单审批流程</h2><span>{{ selectedSamplingRecord.orderNo }} · {{ samplingOrderApprovalStatusText(selectedSamplingRecord) }}</span></div><button type="button" @click="showSamplingOrderApprovalFlow = false"><X :size="13" /> 关闭</button></div>
+            <div class="sampling-approval-body">
+              <div class="sampling-approval-summary"><div><span>样品名称</span><b>{{ selectedSamplingRecord.sampleName }}</b></div><div><span>当前节点</span><b>{{ samplingOrderApprovalStepText(selectedSamplingRecord.samplingOrderApprovalStep) }}</b></div><div><span>提交人</span><b>{{ selectedSamplingRecord.samplingOrderApprovalHistory?.[0]?.user ?? selectedSamplingRecord.sampler }}</b></div><div><span>审批状态</span><b>{{ samplingOrderApprovalStatusText(selectedSamplingRecord) }}</b></div></div>
+              <div class="sampling-approval-route sampling-order-approval-route"><template v-for="(item, index) in samplingOrderApprovalFlowItems(selectedSamplingRecord)" :key="item.name"><i v-if="index > 0"></i><div :class="item.state"><component :is="item.icon" :size="16" /><span>{{ item.name }}</span></div></template></div>
+              <div class="sampling-approval-history"><h3>审批记录</h3><div v-for="item in selectedSamplingRecord.samplingOrderApprovalHistory ?? []" :key="`${item.title}-${item.time}`"><b>{{ item.title }}</b><span>{{ item.user }} · {{ item.time }}</span><p v-if="item.opinion">{{ item.opinion }}</p></div><div v-if="!selectedSamplingRecord.samplingOrderApprovalHistory?.length"><span>暂无审批记录</span></div></div>
+              <div v-if="canApproveSamplingOrder(selectedSamplingRecord)" class="sampling-approval-actions"><label>审批意见<textarea v-model="samplingOrderApprovalOpinion" placeholder="可填写审批说明或退回原因"></textarea></label><div><button type="button" class="return" @click="approveSamplingOrder('return')"><CornerDownLeft :size="13" /> 退回修改</button><button type="button" class="pass" @click="approveSamplingOrder('pass')"><CheckCircle2 :size="13" /> {{ selectedSamplingRecord.samplingOrderApprovalStep === '批准人' ? '批准通过' : '审批通过' }}</button></div></div><div v-else-if="selectedSamplingRecord.samplingOrderApprovalStep" class="sampling-approval-waiting">当前节点由 {{ samplingOrderApprovalStepText(selectedSamplingRecord.samplingOrderApprovalStep) }} 处理，当前用户仅可查看审批进度。</div>
+            </div>
+          </section>
+        </div>
+
         <div v-if="showSamplingApprovalFlow && selectedSamplingRecord" class="process-dialog-mask" @click.self="showSamplingApprovalFlow = false">
           <section class="sampling-approval-dialog">
             <div class="process-dialog-head"><div><h2>扦样单送收样审批流</h2><span>{{ selectedSamplingRecord.orderNo }} · {{ selectedSamplingRecord.samplingApprovalStep ?? selectedSamplingRecord.samplingApprovalStatus ?? '已完成' }}</span></div><button type="button" @click="showSamplingApprovalFlow = false"><X :size="13" /> 关闭</button></div>
@@ -6630,17 +6794,13 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
           </section>
         </div>
 
-        <div v-if="upcomingBusinessDialog && upcomingBusinessRecord" class="process-dialog-mask" @click.self="upcomingBusinessDialog = null">
-          <section class="send-sample-dialog upcoming-action-dialog">
-            <div class="process-dialog-head"><div><h2>{{ upcomingBusinessDialog === 'retain' ? '留样信息核对' : '销样处置信息' }}</h2><span>{{ displaySampleNo(upcomingBusinessRecord) }}</span></div><button type="button" @click="upcomingBusinessDialog = null">关闭</button></div>
-            <div class="detail-sections">
-              <section class="detail-section"><h3>{{ upcomingBusinessDialog === 'retain' ? '留样信息' : '销样信息' }}</h3><div class="detail-grid compact">
-                <div><span>样品名称</span><b>{{ upcomingBusinessRecord.sampleName }}</b></div><div><span>报告编号</span><b>{{ upcomingBusinessRecord.reportNo ?? '未生成' }}</b></div>
-                <div><span>样品数量</span><b>{{ sampleCountWithUnit(upcomingBusinessRecord) }}</b></div><div><span>{{ upcomingBusinessDialog === 'retain' ? '留样数量' : '不合格项' }}</span><b>{{ upcomingBusinessDialog === 'retain' ? retainCountWithUnit(upcomingBusinessRecord) : `${reportUnqualifiedCount(upcomingBusinessRecord)} 项` }}</b></div>
-                <div><span>{{ upcomingBusinessDialog === 'retain' ? '留样时间' : '销样来源' }}</span><b>{{ upcomingBusinessDialog === 'retain' ? (upcomingBusinessRecord.retainTime ?? ledgerHandleTime(upcomingBusinessRecord)) : (retainStatusLevel(upcomingBusinessRecord) === 'expired' ? '留样到期确认转入' : upcomingBusinessRecord.approvalStatus) }}</b></div><div><span>{{ upcomingBusinessDialog === 'retain' ? '到期状态' : '当前状态' }}</span><b>{{ upcomingBusinessDialog === 'retain' ? retainExpireStatus(upcomingBusinessRecord) : '待销样处置' }}</b></div>
-              </div></section>
+        <div v-if="upcomingApprovalDialog" class="process-dialog-mask" @click.self="upcomingApprovalDialog = null">
+          <section class="upcoming-approval-dialog">
+            <div class="process-dialog-head"><div><h2>{{ upcomingApprovalMeta.title }}</h2><span>{{ upcomingApprovalMeta.description }} · 当前用户：{{ currentLoginUser?.name ?? '未登录' }}</span></div><button type="button" @click="upcomingApprovalDialog = null"><X :size="13" /> 关闭</button></div>
+            <div class="upcoming-approval-body">
+              <div class="upcoming-approval-summary"><span>待办数量 <b>{{ upcomingApprovalRecords.length }}</b></span><span>操作权限 <b>同意 / 退回修改</b></span><span>状态同步 <b>实时更新</b></span></div>
+              <div class="upcoming-approval-table-wrap"><table class="lab-table upcoming-approval-table"><thead><tr><th>业务类型</th><th>单据编号</th><th>样品信息</th><th>当前节点</th><th>业务摘要</th><th>操作</th></tr></thead><tbody><tr v-for="record in upcomingApprovalRecords" :key="`${upcomingApprovalDialog}-${record.orderNo}-${record.retainRecordId ?? ''}-${record.destroyRecordId ?? ''}`"><td>{{ upcomingApprovalBusinessText(record) }}</td><td>{{ upcomingApprovalRecordNo(record) }}</td><td><b>{{ displaySampleNo(record) }}</b><span>{{ record.sampleName }}</span></td><td><span class="upcoming-approval-step">{{ upcomingApprovalStepText(record) }}</span></td><td><span v-if="upcomingApprovalDialog === 'sampling'">{{ record.reason }} · {{ record.warehouseNo }}仓</span><span v-else-if="upcomingApprovalDialog === 'approval'">{{ record.reportMeta?.category ?? '检验报告' }} · {{ reportConclusion(record) }}</span><span v-else-if="upcomingApprovalDialog === 'retain'">{{ retainCountWithUnit(record) }} · {{ retainExpireStatus(record) }}</span><span v-else>{{ record.destroySource ?? '销样申请' }} · {{ reportUnqualifiedCount(record) }}项不合格</span></td><td><div class="upcoming-approval-actions"><button type="button" class="upcoming-approval-view" @click="openUpcomingApprovalFlow(record)"><Route :size="12" /> 流程</button><button type="button" class="upcoming-approval-pass" @click="approveUpcomingBusiness(record, 'pass')"><CheckCircle2 :size="12" /> 同意</button><button type="button" class="upcoming-approval-return" @click="approveUpcomingBusiness(record, 'return')"><CornerDownLeft :size="12" /> 退回修改</button></div></td></tr><tr v-if="!upcomingApprovalRecords.length"><td colspan="6" class="upcoming-approval-empty">当前用户没有待处理的审批事项。</td></tr></tbody></table></div>
             </div>
-            <div class="dialog-actions"><button v-if="upcomingBusinessDialog === 'retain' && upcomingBusinessRecord.retainRecordId" type="button" @click="openRetainApprovalFlow(upcomingBusinessRecord); upcomingBusinessDialog = null">查看审批流程</button><button v-if="upcomingBusinessDialog === 'destroy' && upcomingBusinessRecord.destroyRecordId" type="button" @click="openDestroyApprovalFlow(upcomingBusinessRecord); upcomingBusinessDialog = null">查看销样流程</button><button v-if="upcomingBusinessDialog === 'destroy' && !upcomingBusinessRecord.destroyRecordId && reportHasFormalReport(upcomingBusinessRecord)" type="button" @click="openReportView(upcomingBusinessRecord.sampleNo); upcomingBusinessDialog = null">查看质检报告</button><button v-else-if="upcomingBusinessDialog === 'destroy' && !upcomingBusinessRecord.destroyRecordId" type="button" @click="openQualityResultView(upcomingBusinessRecord.sampleNo); upcomingBusinessDialog = null">查看质检结果</button><button type="button" @click="upcomingBusinessDialog = null">关闭</button></div>
           </section>
         </div>
 
