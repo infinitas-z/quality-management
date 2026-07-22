@@ -388,6 +388,8 @@ const activeMenu = ref('dashboard')
 const selectedWarehouse = ref('51仓')
 const activeWarehousePositionIndex = ref(0)
 const warehouseMapShell = ref<HTMLElement | null>(null)
+const warehouseMapViewport = ref({ width: 0, height: 0 })
+let warehouseMapResizeObserver: ResizeObserver | null = null
 const warehouseMapCalibrationMode = ref(false)
 const warehouseMapCalibrationHover = ref<WarehouseMarkerCoordinate | null>(null)
 const warehouseMapCalibrationSelectedIndex = ref<number | null>(null)
@@ -563,7 +565,7 @@ const environmentChartHeight = 320
 const environmentChartPaddingX = 64
 const environmentChartPaddingY = 28
 const environmentChartLabelY = 306
-const loginForm = ref({ username: 'wangshuai', password: '123456' })
+const loginForm = ref({ username: 'lishenhe', password: '123456' })
 const currentLoginUser = ref<SystemUser | null>(null)
 const samplingFormMode = ref<'create' | 'edit'>('create')
 const samplingForm = ref<SamplingForm>({ orderNo: '', sampleNo: '', sampleName: '', sampleCount: '2kg × 4', sampleUnit: 'kg', sampler: '张三', samplingDate: '2026-07-04', reason: '入库验收', grainType: '玉米', warehouseNo: '49', company: '中央储备粮镇江直属库有限公司', depot: '安鸿智慧粮库', representativeQuantity: '100.000', nature: '中央储备粮', origin: '江苏', productionYear: '2026', storageDate: '2026-06-17', packageType: '散装', retainCount: '1', inspectionCount: '1', keeper: '王保管', remark: '样品用于质量检验流程演示。', cargoPosition: '49仓1号货位', surveyNo: '' })
@@ -3847,6 +3849,15 @@ onMounted(() => {
   loadPersistedState()
   loadWarehouseMapCalibration()
   persistState()
+  if (warehouseMapShell.value) {
+    const updateWarehouseMapViewport = () => {
+      const rect = warehouseMapShell.value?.getBoundingClientRect()
+      if (rect) warehouseMapViewport.value = { width: rect.width, height: rect.height }
+    }
+    updateWarehouseMapViewport()
+    warehouseMapResizeObserver = new ResizeObserver(updateWarehouseMapViewport)
+    warehouseMapResizeObserver.observe(warehouseMapShell.value)
+  }
 })
 
 const handleStorageChange = (event: StorageEvent) => {
@@ -3854,7 +3865,11 @@ const handleStorageChange = (event: StorageEvent) => {
 }
 
 onMounted(() => window.addEventListener('storage', handleStorageChange))
-onUnmounted(() => window.removeEventListener('storage', handleStorageChange))
+onUnmounted(() => {
+  window.removeEventListener('storage', handleStorageChange)
+  warehouseMapResizeObserver?.disconnect()
+  warehouseMapResizeObserver = null
+})
 
 const warehousePositionTimer = window.setInterval(() => {
   activeWarehousePositionIndex.value = (activeWarehousePositionIndex.value + 1) % selectedWarehousePositions.value.length
@@ -4726,15 +4741,17 @@ const deleteUser = (username: string) => {
 // The warehouse roofs form a staggered diagonal grid in the aerial image.
 // Keeping the coordinates explicit makes future alignment against a new base map straightforward.
 const warehouseMarkerCoordinates: WarehouseMarkerCoordinate[] = [
-  { x: 38.0, y: 19.5 }, { x: 43.6, y: 23.6 }, { x: 48.7, y: 27.3 }, { x: 54.4, y: 31.8 },
-  { x: 59.6, y: 35.2 }, { x: 66.2, y: 39.9 }, { x: 71.3, y: 43.7 }, { x: 77.5, y: 48.2 }, { x: 57.1, y: 41.2 },
-  { x: 26.2, y: 31.6 }, { x: 32.6, y: 35.6 }, { x: 39.0, y: 39.6 }, { x: 45.4, y: 43.6 }, { x: 51.8, y: 47.6 }, { x: 58.2, y: 51.6 },
-  { x: 20.9, y: 38.0 }, { x: 27.3, y: 42.0 }, { x: 33.7, y: 46.0 }, { x: 40.1, y: 50.0 }, { x: 46.5, y: 54.0 }, { x: 52.9, y: 58.0 }, { x: 59.3, y: 62.0 },
-  { x: 17.2, y: 45.0 }, { x: 23.6, y: 49.0 }, { x: 30.0, y: 53.0 }, { x: 36.4, y: 57.0 }, { x: 42.8, y: 61.0 }, { x: 49.2, y: 65.0 }, { x: 55.6, y: 69.0 }, { x: 62.0, y: 73.0 },
-  { x: 68.0, y: 77.0 }, { x: 74.0, y: 82.0 },
+  { x: 38.8, y: 23.1 }, { x: 46.1, y: 28 }, { x: 52, y: 32.2 }, { x: 59.1, y: 37.2 }, { x: 64.7, y: 41.3 }, { x: 71.4, y: 45.3 }, { x: 78.1, y: 50.4 }, { x: 85, y: 55.4 },{ x: 91.3, y: 59.8 },
+  { x: 31.3, y: 27.6 }, { x: 38.1, y: 32.5 }, { x:44.1, y: 36.4 }, { x: 50.8, y: 41.5 }, { x: 57.3, y: 46.2 }, { x: 64.1, y: 50.7 }, { x: 70.3, y: 55.2 }, { x: 77.6, y: 60.5 },{ x: 84.2, y: 65.4 },
+  { x: 22.9, y: 33.5 }, { x: 29.9, y: 37.8 }, { x: 35.6, y: 43 }, { x: 42.5, y: 47.4 }, { x: 48.7, y: 52.4 }, { x: 55.7, y: 57.3 },{ x: 62, y: 61.4 }, { x: 69.2, y: 66.9 }, { x:75.8, y: 71.3 },
+  { x: 15.2, y: 37.6 }, { x: 22.2, y: 42.3 }, { x: 28.1, y: 47 }, { x: 35.2, y: 51.9 }, { x: 41.1, y: 57.3 }, { x: 48.2, y: 61.8 }, { x: 54.3, y: 66.2 }, { x: 61.4, y: 71.4 },
+  { x: 7.7, y: 42.2 }, { x: 14.5, y: 47.7 }, { x: 20.5, y: 51.9 }, { x: 27.2, y: 57.2 }, { x: 33.3, y: 61.6 }, { x: 40.3, y: 67.1 }, { x: 46.6, y: 71.3 }, { x: 54.1, y: 77.2 },
 ]
-const warehouseMarkerNumbers = [...Array.from({ length: 30 }, (_, index) => index + 49), 81, 86]
-const warehouseMapCalibrationStorageKey = 'quality-management-warehouse-map-calibration-v1'
+// The calibrated layout contains 43 physical storage points. Keep the IDs
+// contiguous so every marker has a stable, unique Vue key and can be selected.
+const warehouseMarkerNumbers = Array.from({ length: warehouseMarkerCoordinates.length }, (_, index) => index + 49)
+const warehouseMapCalibrationStorageKey = 'quality-management-warehouse-map-calibration-v2'
+const warehouseMapDefaultCoordinates = ref<WarehouseMarkerCoordinate[]>(warehouseMarkerCoordinates.map((point) => ({ ...point })))
 const activeWarehouseMarkerCoordinates = ref<WarehouseMarkerCoordinate[]>(warehouseMarkerCoordinates.map((point) => ({ ...point })))
 
 const warehouseMarkers = computed(() => activeWarehouseMarkerCoordinates.value.map((point, index) => {
@@ -4757,6 +4774,30 @@ const warehouseMapCalibrationSource = computed(() => {
   return `const warehouseMarkerCoordinates: WarehouseMarkerCoordinate[] = [\n${coordinates}\n]`
 })
 
+// The base map is 2244 x 1524. `contain` leaves a letterbox when the panel
+// has another ratio, so marker coordinates must be projected into that box.
+const warehouseMapImageRatio = 2244 / 1524
+const warehouseMapImageBox = computed(() => {
+  // Touch the reactive viewport so this projection updates on panel resize.
+  const { width, height } = warehouseMapViewport.value
+  if (!width || !height) return { left: 0, top: 0, width: 100, height: 100 }
+  const panelRatio = width / height
+  if (panelRatio > warehouseMapImageRatio) {
+    const imageWidth = (height * warehouseMapImageRatio / width) * 100
+    return { left: (100 - imageWidth) / 2, top: 0, width: imageWidth, height: 100 }
+  }
+  const imageHeight = (width / warehouseMapImageRatio / height) * 100
+  return { left: 0, top: (100 - imageHeight) / 2, width: 100, height: imageHeight }
+})
+
+const warehouseMapMarkerStyle = (point: WarehouseMarkerCoordinate) => {
+  const box = warehouseMapImageBox.value
+  return {
+    left: `${box.left + (point.x / 100) * box.width}%`,
+    top: `${box.top + (point.y / 100) * box.height}%`,
+  }
+}
+
 const loadWarehouseMapCalibration = () => {
   const raw = localStorage.getItem(warehouseMapCalibrationStorageKey)
   if (!raw) return
@@ -4773,7 +4814,7 @@ const loadWarehouseMapCalibration = () => {
       if (normalizedCoordinates.length < warehouseMarkerCoordinates.length) {
         normalizedCoordinates.push(...warehouseMarkerCoordinates.slice(normalizedCoordinates.length).map((point) => ({ ...point })))
       }
-      activeWarehouseMarkerCoordinates.value = normalizedCoordinates
+      activeWarehouseMarkerCoordinates.value = normalizedCoordinates.map((point) => ({ ...point }))
     }
   } catch {
     localStorage.removeItem(warehouseMapCalibrationStorageKey)
@@ -4783,9 +4824,13 @@ const loadWarehouseMapCalibration = () => {
 const warehouseMapCoordinateFromPointer = (event: PointerEvent | MouseEvent) => {
   const rect = warehouseMapShell.value?.getBoundingClientRect()
   if (!rect) return null
+  const box = warehouseMapImageBox.value
+  const shellX = ((event.clientX - rect.left) / rect.width) * 100
+  const shellY = ((event.clientY - rect.top) / rect.height) * 100
+  if (shellX < box.left || shellX > box.left + box.width || shellY < box.top || shellY > box.top + box.height) return null
   return {
-    x: Math.max(0, Math.min(100, Number((((event.clientX - rect.left) / rect.width) * 100).toFixed(1)))),
-    y: Math.max(0, Math.min(100, Number((((event.clientY - rect.top) / rect.height) * 100).toFixed(1)))),
+    x: Math.max(0, Math.min(100, Number((((shellX - box.left) / box.width) * 100).toFixed(1)))),
+    y: Math.max(0, Math.min(100, Number((((shellY - box.top) / box.height) * 100).toFixed(1)))),
   }
 }
 
@@ -4846,9 +4891,12 @@ const deleteSelectedWarehouseMapCoordinate = () => {
 }
 
 const resetWarehouseMapCalibration = () => {
-  activeWarehouseMarkerCoordinates.value = warehouseMarkerCoordinates.map((point) => ({ ...point }))
+  activeWarehouseMarkerCoordinates.value = warehouseMapDefaultCoordinates.value.map((point) => ({ ...point }))
+  warehouseMapCalibrationMode.value = false
+  warehouseMapCalibrationHover.value = null
   warehouseMapCalibrationSelectedIndex.value = null
-  warehouseMapCalibrationNotice.value = '已恢复源码点位'
+  finishWarehouseMapCoordinateDrag()
+  warehouseMapCalibrationNotice.value = '已恢复默认点位'
 }
 
 const copyWarehouseMapCalibration = async () => {
@@ -5126,17 +5174,17 @@ const shouldHideGrainType = (status: string) => status === '待扦样'
                   <div class="map-calibration-actions">
                     <button type="button" title="复制当前点位坐标" @click="copyWarehouseMapCalibration"><Copy :size="14" /></button>
                     <button type="button" title="删除选中点位" :disabled="warehouseMapCalibrationSelectedIndex === null" @click="deleteSelectedWarehouseMapCoordinate"><Trash2 :size="14" /></button>
-                    <button type="button" title="恢复源码默认点位" @click="resetWarehouseMapCalibration"><RotateCcw :size="14" /></button>
+                    <button type="button" title="恢复默认点位" @click="resetWarehouseMapCalibration"><RotateCcw :size="14" /></button>
                   </div>
                   <small v-if="warehouseMapCalibrationNotice">{{ warehouseMapCalibrationNotice }}</small>
                 </div>
-                <img class="warehouse-map-image" src="/beijing.png" alt="镇江库区图片" />
+                <img class="warehouse-map-image" src="/镇江库区图片.png" alt="镇江库区图片" />
                 <button
                   v-for="(marker, index) in warehouseMarkers"
-                  :key="marker.code"
+                  :key="`${marker.code}-${index}`"
                   class="warehouse-marker"
                   :class="[warehouseMarkerStatus(marker), { selected: !warehouseMapCalibrationMode && selectedWarehouse === marker.code, calibrating: warehouseMapCalibrationMode, 'calibration-selected': warehouseMapCalibrationMode && warehouseMapCalibrationSelectedIndex === index }]"
-                  :style="{ left: `${marker.x}%`, top: `${marker.y}%` }"
+                  :style="warehouseMapMarkerStyle(marker)"
                   type="button"
                   :title="warehouseMapCalibrationMode ? `${marker.code}：拖动微调` : marker.code"
                   @pointerdown.stop="startWarehouseMapCoordinateDrag(index, $event)"
